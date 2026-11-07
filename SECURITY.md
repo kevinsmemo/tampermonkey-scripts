@@ -9,7 +9,7 @@ The `.gitignore` is a convenience, not a security boundary. Review the diff and 
 ## Userscript permissions
 
 - Run only on specific Threads domains.
-- `GM_xmlhttpRequest` is allowed only as a user-clicked fallback after `GM_download` fails; the requested URL must pass the fixed HTTPS Threads/Meta media-host allowlist. Forbid `@connect *`, unrestricted `@match`, external `@require`, analytics and telemetry.
+- The v5 rebuild uses only `GM_download` after an explicit click and a Threads/Meta HTTPS host allowlist. It does not use `GM_xmlhttpRequest` or `@connect *`; unrestricted `@match`, external `@require`, analytics and telemetry are forbidden.
 - Download media only when a user clicks a button, and only from expected HTTPS media hosts.
 - Do not explicitly access, collect, log, or transmit login cookies, localStorage, personal messages, or browser history. Browser-managed cookies may still accompany direct requests to expected media hosts.
 - Do not create automatic remote requests beyond the browser's normal website activity and Tampermonkey's update checks.
