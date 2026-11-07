@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Threads.net Media Downloader v5 (Maintained Beta)
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      5.1.0-beta.4
+// @version      5.1.0-beta.5
 // @description  One Download button per Threads post to save that post's photos and direct videos.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -59,6 +59,10 @@
   const moreOriginalTranslate = new WeakMap();
   const MORE_GAP = 12;
   let scanTimer = null;
+  let captureMode = false;
+  let captureStartedAt = 0;
+  let capturePreviewSeen = false;
+  let captureCheckTimer = null;
 
   const style = document.createElement('style');
   style.textContent = [
@@ -72,6 +76,7 @@
     '.' + BTN + ':disabled{opacity:.72;cursor:progress;}',
     '.' + BTN + '.tm-threads-v5-header{position:absolute!important;',
     'right:12px;top:8px;z-index:100;margin:0!important;}',
+    '[role="dialog"] .' + BTN + ',[aria-modal="true"] .' + BTN + '{display:none!important;}',
   ].join('');
   (document.head || document.documentElement).appendChild(style);
 
@@ -358,7 +363,89 @@
       (moreOriginalTranslate.get(more) || '0px') + ' - ' + reserved + 'px) 0px';
   }
 
+  // Threads "Copy as image" can capture a DOM clone containing custom
+  // userscript buttons. Remove ours BEFORE Threads handles that user action.
+  // In addition, never inject Download into a preview modal.
+  function isCopyAsImageAction(target) {
+    if (!(target instanceof Element)) return false;
+    const control = target.closest('button,[role="menuitem"],[role="button"],a');
+    if (!control) return false;
+    const labels = [
+      control.getAttribute('aria-label'),
+      control.getAttribute('title'),
+      control.textContent,
+    ];
+    return labels.some(value => /^(copy as image|copy image|複製為圖片|複製成圖片|以圖片形式複製|複製圖片|复制为图片|复制成图片)$/i
+      .test(String(value || '').trim().replace(/\s+/g, ' ')));
+  }
+
+  function isCopyPreviewVisible() {
+    const controls = document.querySelectorAll('button,label,[role="checkbox"],[role="switch"]');
+    for (const control of controls) {
+      const name = (control.textContent || '').trim();
+      if (/^(show metrics|顯示數據|顯示統計|顯示指標|显示数据)$/i.test(name)) {
+        const box = control.getBoundingClientRect();
+        if (box.width && box.height) return true;
+      }
+    }
+    // Some builds expose the image-copy overlay as a native dialog.
+    const modal = document.querySelector('[role="dialog"][aria-modal="true"]');
+    return !!(modal && modal.getBoundingClientRect().width);
+  }
+
+  function finishCopyCapture() {
+    if (!captureMode) return;
+    captureMode = false;
+    capturePreviewSeen = false;
+    if (captureCheckTimer) clearTimeout(captureCheckTimer);
+    captureCheckTimer = null;
+    schedule();
+  }
+
+  function checkCopyCapture() {
+    if (!captureMode) return;
+    const previewVisible = isCopyPreviewVisible();
+    if (previewVisible) capturePreviewSeen = true;
+    // The preview may be created asynchronously. Keep buttons removed until
+    // it closes; recover after 15 seconds if a preview never appears.
+    if ((capturePreviewSeen && !previewVisible) ||
+        (!capturePreviewSeen && Date.now() - captureStartedAt > 15000)) {
+      finishCopyCapture();
+      return;
+    }
+    captureCheckTimer = setTimeout(checkCopyCapture, 450);
+  }
+
+  function beginCopyCapture() {
+    if (captureMode) return;
+    captureMode = true;
+    captureStartedAt = Date.now();
+    capturePreviewSeen = false;
+    if (scanTimer !== null) {
+      clearTimeout(scanTimer);
+      scanTimer = null;
+    }
+    // Physical removal, rather than just CSS hiding, prevents inclusion in
+    // screenshots even if the renderer ignores external stylesheets.
+    document.querySelectorAll('.' + BTN).forEach(button => button.remove());
+    checkCopyCapture();
+  }
+
+  // Capture listeners run ahead of React's click handlers and screenshot
+  // generation. Keyboard activation is supported too.
+  document.addEventListener('pointerdown', event => {
+    if (isCopyAsImageAction(event.target)) beginCopyCapture();
+  }, true);
+  document.addEventListener('click', event => {
+    if (isCopyAsImageAction(event.target)) beginCopyCapture();
+  }, true);
+  document.addEventListener('keydown', event => {
+    if ((event.key === 'Enter' || event.key === ' ') &&
+        isCopyAsImageAction(event.target)) beginCopyCapture();
+  }, true);
+
   function attach(anchor) {
+    if (captureMode || anchor.closest('[role="dialog"],[aria-modal="true"]')) return;
     if (!isTimeLink(anchor)) return;
     const identity = identityFrom(anchor.href);
     const card = findCard(anchor, identity);
@@ -384,6 +471,7 @@
 
   function scan() {
     scanTimer = null;
+    if (captureMode) return;
     for (const anchor of document.querySelectorAll(POST_LINK)) {
       attach(anchor);
     }
@@ -403,5 +491,5 @@
     window.addEventListener('resize', schedule, { passive: true });
     schedule();
   }
-  console.info('[Threads v5 Maintained] 5.1.0-beta.4 loaded');
+  console.info('[Threads v5 Maintained] 5.1.0-beta.5 loaded');
 })();
