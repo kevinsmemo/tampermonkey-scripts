@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Threads.net Media Downloader v5 (Maintained Beta)
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      5.1.0-beta.2
+// @version      5.1.0-beta.3
 // @description  One Download button per Threads post to save that post's photos and direct videos.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -56,6 +56,9 @@
   const MEDIA_SELECTOR = 'picture img, a[href*="/media"] img, video';
   const ALLOWED_HOSTS = ['fbcdn.net', 'cdninstagram.com', 'threads.com', 'threads.net'];
   const installed = new WeakMap();
+  const moreOriginalTranslate = new WeakMap();
+  const DOWNLOAD_WIDTH = 132;
+  const MORE_GAP = 20;
   let scanTimer = null;
 
   const style = document.createElement('style');
@@ -68,8 +71,8 @@
     'cursor:pointer;white-space:nowrap;box-shadow:none!important;}',
     '.' + BTN + ':hover{background:#777!important;}',
     '.' + BTN + ':disabled{opacity:.72;cursor:progress;}',
-    '.' + BTN + '.tm-threads-v5-fallback{position:absolute!important;right:0;',
-    'top:8px;z-index:100;margin:0!important;}',
+    '.' + BTN + '.tm-threads-v5-header{position:absolute!important;',
+    'right:12px;top:8px;width:132px;z-index:100;margin:0!important;}',
   ].join('');
   (document.head || document.documentElement).appendChild(style);
 
@@ -324,13 +327,47 @@
     return candidates[0];
   }
 
+  // Preserve the original v5 header layout: More, then Download. The React
+  // header already puts More at the far right; inserting a button after it in
+  // normal flow clips the new control. Position Download INSIDE the post's
+  // header boundary, then translate More left to reserve the original order.
+  function layoutHeaderActions(card, button, more) {
+    if (!card.isConnected || !button.isConnected) return;
+    if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
+    if (!more || !more.isConnected) {
+      button.style.top = '8px';
+      button.style.right = '12px';
+      return;
+    }
+
+    // Measure the unshifted More position; otherwise repeated scans would
+    // accumulate offsets and drift out of alignment.
+    if (!moreOriginalTranslate.has(more)) {
+      moreOriginalTranslate.set(more, more.style.translate || '');
+    }
+    more.style.translate = moreOriginalTranslate.get(more);
+    const m = more.getBoundingClientRect();
+    const c = card.getBoundingClientRect();
+    const buttonHeight = 40;
+    const reserved = DOWNLOAD_WIDTH + MORE_GAP;
+    const originalRight = Math.min(c.right - 8, Math.max(c.left + DOWNLOAD_WIDTH + 8, m.right));
+    button.style.right = Math.max(8, Math.round(c.right - originalRight)) + 'px';
+    button.style.top = Math.max(0, Math.round(m.top - c.top +
+      card.scrollTop + (m.height - buttonHeight) / 2)) + 'px';
+    more.style.translate = 'calc(' +
+      (moreOriginalTranslate.get(more) || '0px') + ' - ' + reserved + 'px) 0px';
+  }
+
   function attach(anchor) {
     if (!isTimeLink(anchor)) return;
     const identity = identityFrom(anchor.href);
     const card = findCard(anchor, identity);
     if (!card) return;
     const existing = installed.get(card);
-    if (existing && existing.button.isConnected) return;
+    if (existing && existing.button.isConnected) {
+      layoutHeaderActions(card, existing.button, existing.more);
+      return;
+    }
     const button = document.createElement('button');
     button.type = 'button';
     button.className = BTN;
@@ -339,16 +376,10 @@
     button.setAttribute('aria-label', '下載此則 Threads 貼文的所有媒體');
     button.addEventListener('click', event => downloadPost(event, card, identity, button), true);
     const more = findMoreControl(card, anchor);
-    if (more && more.parentElement) {
-      more.parentElement.insertBefore(button, more.nextSibling);
-    } else {
-      // Fallback keeps it in the top-right header even if Threads changes
-      // the "More" control's accessibility labels.
-      if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
-      button.classList.add('tm-threads-v5-fallback');
-      card.appendChild(button);
-    }
-    installed.set(card, { code: identity.code, button });
+    button.classList.add('tm-threads-v5-header');
+    card.appendChild(button);
+    layoutHeaderActions(card, button, more);
+    installed.set(card, { code: identity.code, button, more });
   }
 
   function scan() {
@@ -369,7 +400,8 @@
       if (event.target?.tagName === 'IMG' || event.target?.tagName === 'VIDEO') schedule();
     }, true);
     window.addEventListener('popstate', schedule);
+    window.addEventListener('resize', schedule, { passive: true });
     schedule();
   }
-  console.info('[Threads v5 Maintained] 5.1.0-beta.2 loaded');
+  console.info('[Threads v5 Maintained] 5.1.0-beta.3 loaded');
 })();
