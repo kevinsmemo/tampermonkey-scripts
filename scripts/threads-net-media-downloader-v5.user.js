@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Threads.net Media Downloader v5 (Maintained Beta)
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      5.1.0-beta.1
+// @version      5.1.0-beta.2
 // @description  One Download button per Threads post to save that post's photos and direct videos.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -62,8 +62,8 @@
   style.textContent = [
     '.' + BTN + '{display:inline-flex!important;align-items:center;justify-content:center;',
     'box-sizing:border-box;flex-shrink:0;vertical-align:middle;',
-    'margin-left:12px;padding:6px 14px;min-width:118px;height:36px;',
-    'font:500 16px/1.2 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;',
+    'margin-left:12px;padding:8px 16px;min-width:132px;height:40px;',
+    'font:500 18px/1.2 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;',
     'color:#fff!important;background:#666!important;border:0;border-radius:5px;',
     'cursor:pointer;white-space:nowrap;box-shadow:none!important;}',
     '.' + BTN + ':hover{background:#777!important;}',
@@ -340,7 +340,7 @@
     button.addEventListener('click', event => downloadPost(event, card, identity, button), true);
     const more = findMoreControl(card, anchor);
     if (more && more.parentElement) {
-      more.parentElement.insertBefore(button, more);
+      more.parentElement.insertBefore(button, more.nextSibling);
     } else {
       // Fallback keeps it in the top-right header even if Threads changes
       // the "More" control's accessibility labels.
@@ -371,5 +371,5 @@
     window.addEventListener('popstate', schedule);
     schedule();
   }
-  console.info('[Threads v5 Maintained] 5.1.0-beta.1 loaded');
+  console.info('[Threads v5 Maintained] 5.1.0-beta.2 loaded');
 })();
