@@ -2,7 +2,7 @@
 // @name         Threads Video Downloader (Privacy-Focused Fork)
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
 // @version      0.1.0
-// @description  Add manual download buttons for Threads images and videos; no analytics or external services.
+// @description  TEST BUILD: Manual Threads media download; no analytics or external services. Auto updates disabled until release.
 // @author       Manolo Zocco (original); kevinsmemo (fork maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
 // @match        https://threads.net/*
@@ -13,8 +13,8 @@
 // @grant        GM_download
 // @noframes
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/kevinsmemo/tampermonkey-scripts/main/scripts/threads-video-downloader.user.js
-// @downloadURL  https://raw.githubusercontent.com/kevinsmemo/tampermonkey-scripts/main/scripts/threads-video-downloader.user.js
+// @updateURL    none
+// @downloadURL  none
 // @license      MIT
 // ==/UserScript==
 
