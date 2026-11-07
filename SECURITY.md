@@ -11,7 +11,7 @@ The `.gitignore` is a convenience, not a security boundary. Review the diff and 
 - Run only on specific Threads domains.
 - Do not use `GM_xmlhttpRequest`, `@connect *`, unrestricted `@match`, external `@require`, analytics or telemetry unless specifically justified and reviewed.
 - Download media only when a user clicks a button, and only from expected HTTPS media hosts.
-- Do not access or transmit login cookies, localStorage, personal messages, or browser history.
+- Do not explicitly access, collect, log, or transmit login cookies, localStorage, personal messages, or browser history. Browser-managed cookies may still accompany direct requests to expected media hosts.
 - Do not create automatic remote requests beyond the browser's normal website activity and Tampermonkey's update checks.
 
 ## Release and incident policy
