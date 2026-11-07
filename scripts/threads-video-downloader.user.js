@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Threads Video Downloader (Privacy-Focused Fork)
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      2.0.0-beta.1
+// @version      2.0.0-beta.2
 // @description  One-click local downloads for visible Threads media, with narrow permissions and the original-style hover button.
 // @author       Manolo Zocco (original); kevinsmemo (fork maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -248,56 +248,131 @@
     }
   }
 
-  function isPostMedia(media) {
-    if (media.tagName !== 'VIDEO' && media.tagName !== 'IMG') return false;
-    const r = media.getBoundingClientRect();
-    if (r.width < 190 || r.height < 160) return false;
-    if (media.tagName === 'IMG') {
-      const box = media.closest('article,[data-visualcompletion]');
-      if (!box && !location.pathname.includes('/post/')) return false;
-      // Do not place buttons on profile pictures or tiny link-preview art.
-      if (media.closest('a[href*="/profile"],a[href*="/avatar"]')) return false;
-    }
-    return true;
-  }
+  // The previous version attached buttons only when an individual media parent
+  // met strict size constraints. Threads uses varying wrappers, overlays and
+  // lazy-loaded media, so a single floating hover button is more reliable.
+  GM_addStyle([
+    '.tvd-maintained-button.tvd-floating {',
+    '  position: fixed !important; opacity: 1 !important;',
+    '  visibility: visible !important; transform: none !important;',
+    '  pointer-events: auto !important; z-index: 2147483646 !important;',
+    '}'
+  ].join('\n'));
 
-  function attach(media) {
-    if (processed.has(media) || !isPostMedia(media)) return;
-    const host = media.parentElement?.tagName === 'PICTURE' ? media.parentElement.parentElement : media.parentElement;
-    if (!host || host === document.body || host === document.documentElement) return;
-    // Prefer a media-sized box to avoid covering other controls or other posts.
-    const a = media.getBoundingClientRect(), b = host.getBoundingClientRect();
-    if (b.width > a.width * 1.7 || b.height > a.height * 1.7) return;
-    processed.add(media);
-    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
-    host.classList.add(`${MARK}-host`);
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `${MARK}-button`;
-    button.setAttribute('aria-label', '下載 Threads 媒體');
-    button.title = '下載這則 Threads 媒體';
-    button.innerHTML = '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3v10m0 0-4-4m4 4 4-4M4 16h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Download</span>';
-    button.addEventListener('click', e => handleClick(e, media, button), true);
-    host.append(button);
-  }
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = MARK + '-button tvd-floating';
+  button.setAttribute('aria-label', '下載 Threads 媒體');
+  button.title = '下載游標所在的 Threads 圖片或影片';
+  button.innerHTML = '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3v10m0 0-4-4m4 4 4-4M4 16h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Download</span>';
+  button.style.display = 'none';
+  document.body.appendChild(button);
 
+  // Beta-only health indicator: distinguishes a non-running script from media
+  // detection failure. This does not read user data or make network requests.
+  const indicator = document.createElement('div');
+  indicator.textContent = 'Threads DL · Beta 2';
+  indicator.title = '下載腳本已執行。把滑鼠移至貼文圖片或影片上。';
+  indicator.setAttribute('aria-label', 'Threads Downloader 腳本已啟動');
+  indicator.style.cssText = [
+    'position:fixed', 'right:10px', 'bottom:10px', 'z-index:2147483645',
+    'font:11px/1.25 system-ui,sans-serif', 'padding:6px 8px',
+    'color:white', 'background:rgba(0,0,0,.72)', 'border-radius:6px',
+    'pointer-events:none', 'opacity:.75'
+  ].join(';');
+  document.body.appendChild(indicator);
+
+  let selectedMedia = null;
+  let lastPointer = null;
   let scheduled = false;
-  function scheduleScan() {
+
+  function mediaAtPoint(x, y) {
+    let best = null;
+    let bestScore = -Infinity;
+    for (const media of document.querySelectorAll('video, img')) {
+      const rect = media.getBoundingClientRect();
+      if (rect.width < 155 || rect.height < 110) continue;
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
+      if (media.tagName === 'IMG' &&
+          media.closest('a[href*="/avatar"],a[href*="/profile"]')) continue;
+      if (media.tagName === 'IMG' && !media.complete && !media.currentSrc) continue;
+      // Prefer video when media elements overlap; otherwise the most specific
+      // box under the cursor, not the entire surrounding feed container.
+      const score = (media.tagName === 'VIDEO' ? 1000000 : 0) -
+        Math.min(999999, rect.width * rect.height);
+      if (score > bestScore) {
+        best = media;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  function hideButton() {
+    selectedMedia = null;
+    button.style.display = 'none';
+  }
+
+  function positionButton() {
+    if (!selectedMedia || !selectedMedia.isConnected) {
+      hideButton();
+      return;
+    }
+    const r = selectedMedia.getBoundingClientRect();
+    if (r.width < 155 || r.height < 110 ||
+        r.bottom < 0 || r.top > innerHeight ||
+        r.right < 0 || r.left > innerWidth) {
+      hideButton();
+      return;
+    }
+    const left = Math.max(6, Math.min(innerWidth - 116, r.left + 8));
+    const top = Math.max(6, Math.min(innerHeight - 40, r.bottom - 42));
+    button.style.left = left + 'px';
+    button.style.top = top + 'px';
+    button.style.display = 'inline-flex';
+  }
+
+  function updateHover() {
+    scheduled = false;
+    if (!lastPointer || button.disabled) return;
+    const media = mediaAtPoint(lastPointer.x, lastPointer.y);
+    if (!media) {
+      hideButton();
+      return;
+    }
+    selectedMedia = media;
+    positionButton();
+  }
+
+  function scheduleHover() {
     if (scheduled) return;
     scheduled = true;
-    setTimeout(() => {
-      scheduled = false;
-      document.querySelectorAll('video, img').forEach(attach);
-    }, 180);
+    requestAnimationFrame(updateHover);
   }
 
-  const observer = new MutationObserver(scheduleScan);
-  observer.observe(document.documentElement, {
-    childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'poster'],
+  document.addEventListener('pointermove', (event) => {
+    if (event.pointerType === 'touch' || button.contains(event.target)) return;
+    lastPointer = { x: event.clientX, y: event.clientY };
+    scheduleHover();
+  }, { capture: true, passive: true });
+
+  button.addEventListener('pointerenter', () => {
+    // Keep the hover button visible while the pointer is over it.
   });
-  document.addEventListener('load', e => {
-    if (e.target?.tagName === 'IMG' || e.target?.tagName === 'VIDEO') scheduleScan();
+  button.addEventListener('click', (event) => {
+    if (!selectedMedia) return;
+    handleClick(event, selectedMedia, button);
   }, true);
-  window.addEventListener('popstate', scheduleScan);
-  scheduleScan();
+
+  window.addEventListener('scroll', () => {
+    if (!button.disabled) scheduleHover();
+    if (selectedMedia) positionButton();
+  }, { passive: true, capture: true });
+  window.addEventListener('resize', () => {
+    if (selectedMedia) positionButton();
+  }, { passive: true });
+
+  // A DOM change is not required to display the button. On a Threads SPA the
+  // next pointer movement discovers newly loaded images and videos.
+  console.info('[Threads Downloader] v2.0.0-beta.2 active:', location.hostname);
 })();
