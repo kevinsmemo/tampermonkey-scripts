@@ -23,7 +23,9 @@
 
 ## 安裝
 
-目前可直接安裝尚未經 Chrome 實際測試的 v2.0.0-beta.1（只適合測試，腳本內已停用自動更新）：
+目前可直接安裝尚未經 Chrome 實際測試的 v2.0.0-beta.2（只適合測試，腳本內已停用自動更新）：
+
+**Beta 2 故障排查：** 開啟 threads.com 並重新整理，頁面右下角應顯示「Threads DL · Beta 2」；若沒有，先到 Tampermonkey Dashboard 確認腳本已安裝並啟用。單純打開 raw 程式碼連結不等於安裝。若已安裝 Beta 1，需重新由此連結手動安裝 Beta 2（此階段沒有自動更新）。滑鼠移到貼文的影片或大型圖片上，才會浮現 Download 按鈕。
 
 https://raw.githubusercontent.com/kevinsmemo/tampermonkey-scripts/refs/heads/feat/threads-downloader-privacy-first/scripts/threads-video-downloader.user.js
 
