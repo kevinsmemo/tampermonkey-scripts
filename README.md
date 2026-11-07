@@ -13,7 +13,7 @@
 1. 不提交密碼、Cookie、Session、Token、API Key、個人紀錄、HAR、真實瀏覽器匯出資料。
 2. 僅允許腳本執行於需要的 Threads 網域；禁止 `@match *://*/*`。
 3. 不載入第三方 `@require`、遠端程式碼、分析或追蹤服務。
-4. 不讀取或傳送 Threads 登入 Cookie。使用者點擊下載按鈕時，僅對原本的 Threads 媒體網址發起下載。
+4. 不主動讀取、蒐集或附加登入 Cookie。使用者點擊下載按鈕時僅對允許的 Threads 媒體主機發起請求；瀏覽器可能依既有規則自動附帶該主機的 Cookie。
 5. 預設不使用 `GM_xmlhttpRequest` 或 `@connect *`。新權限必須透過 PR 說明目的。
 6. 所有功能修改走 Pull Request；確認程式碼與瀏覽器實測後才合併至 `main`。
 7. 自動更新只追蹤 `main`；沒有經過檢查的分支不得作為更新來源。
