@@ -368,15 +368,20 @@
   // In addition, never inject Download into a preview modal.
   function isCopyAsImageAction(target) {
     if (!(target instanceof Element)) return false;
-    const control = target.closest('button,[role="menuitem"],[role="button"],a');
-    if (!control) return false;
-    const labels = [
-      control.getAttribute('aria-label'),
-      control.getAttribute('title'),
-      control.textContent,
-    ];
-    return labels.some(value => /^(copy as image|copy image|複製為圖片|複製成圖片|以圖片形式複製|複製圖片|复制为图片|复制成图片)$/i
-      .test(String(value || '').trim().replace(/\s+/g, ' ')));
+    const pattern = /^(copy as image|copy image|複製為圖片|複製成圖片|以圖片形式複製|複製圖片|复制为图片|复制成图片)$/i;
+    // Threads sometimes uses custom DIV controls instead of native buttons.
+    // Check only the nearest few ancestors so a whole menu isn't mistaken
+    // for the "Copy as image" action.
+    let node = target;
+    for (let i = 0; node && i < 5; i++, node = node.parentElement) {
+      const labels = [node.getAttribute('aria-label'), node.getAttribute('title'), node.textContent];
+      if (labels.some(value => {
+        const label = String(value || '').trim().replace(/\s+/g, ' ');
+        return label.length <= 80 && pattern.test(label);
+      })) return true;
+      if (node.matches('body,[role="menu"],[role="dialog"]')) break;
+    }
+    return false;
   }
 
   function isCopyPreviewVisible() {
@@ -388,9 +393,16 @@
         if (box.width && box.height) return true;
       }
     }
-    // Some builds expose the image-copy overlay as a native dialog.
-    const modal = document.querySelector('[role="dialog"][aria-modal="true"]');
-    return !!(modal && modal.getBoundingClientRect().width);
+    // Ignore the original share menu; it can also have role="dialog".
+    // Only the preview itself (metrics / Auto / Copy controls) counts.
+    const modals = document.querySelectorAll('[role="dialog"],[aria-modal="true"]');
+    for (const modal of modals) {
+      const content = (modal.textContent || '').toLowerCase();
+      if (modal.getBoundingClientRect().width &&
+          (content.includes('show metrics') ||
+           (content.includes('auto') && content.includes('copy')))) return true;
+    }
+    return false;
   }
 
   function finishCopyCapture() {
