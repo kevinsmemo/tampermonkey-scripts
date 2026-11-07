@@ -68,7 +68,7 @@
     'cursor:pointer;white-space:nowrap;box-shadow:none!important;}',
     '.' + BTN + ':hover{background:#777!important;}',
     '.' + BTN + ':disabled{opacity:.72;cursor:progress;}',
-    '.' + BTN + '.tm-threads-v5-fallback{position:absolute!important;right:46px;',
+    '.' + BTN + '.tm-threads-v5-fallback{position:absolute!important;right:0;',
     'top:8px;z-index:100;margin:0!important;}',
   ].join('');
   (document.head || document.documentElement).appendChild(style);
