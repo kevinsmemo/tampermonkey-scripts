@@ -64,7 +64,7 @@
   const css = `
     .${MARK}-host { isolation: isolate; }
     .${MARK}-button {
-      position: absolute !important; left: 8px !important; bottom: 8px !important;
+      position: absolute !important;
       z-index: 2147483 !important; display: inline-flex !important;
       align-items: center; gap: 6px; box-sizing: border-box;
       height: 34px; padding: 0 12px; border: 0 !important;
