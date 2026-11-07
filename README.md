@@ -6,7 +6,7 @@
 與 Manolo Zocco 的 Threads Video Downloader 不同。先前誤用的草稿已從本 PR 移除。
 
 ## 目前測試版
-- 版本：5.1.0-beta.4
+- 版本：5.1.0-beta.5
 - 安裝網址：https://raw.githubusercontent.com/kevinsmemo/tampermonkey-scripts/refs/heads/feat/threads-downloader-privacy-first/scripts/threads-net-media-downloader-v5.user.js
 - Pull Request：https://github.com/kevinsmemo/tampermonkey-scripts/pull/1
 - 每則貼文常駐一個灰色 Download 按鈕，位置保留在標頭「⋯」右側。Beta 4 改用緊湊自適應大小，不再硬設最小寬 132px、高 40px、字體 18px；保留貼文內定位，按實際按鈕寬度調整「⋯」的位置。
@@ -20,7 +20,13 @@
 2. 點擊上述安裝網址；若只顯示原始碼，請在 Tampermonkey 的 Utilities / Install from URL 貼上連結。
 3. 開啟 https://www.threads.com/ 並重新整理，確認每則貼文右上方的 Download。
 4. 先測公開單圖，再測多圖、影片；可能需要同意瀏覽器的多檔下載權限。
-5. 如果看不到按鈕，先確認腳本已啟用，Console 應出現 [Threads v5 Maintained] 5.1.0-beta.4 loaded。
+5. 如果看不到按鈕，先確認腳本已啟用，Console 應出現 [Threads v5 Maintained] 5.1.0-beta.5 loaded。
+
+## Copy as image 截圖排除
+- Beta 5：使用 Threads 分享選單的 Copy as image 時，在原生截圖動作發生前暫時移除所有 Download 按鈕，避免被截進圖片；預覽關閉後再恢復。
+- 避免在 role=dialog 的預覽視窗內注入下載按鈕。僅在分享截圖流程觸發，不更改一般貼文 Download 的尺寸或位置。
+- 支援滑鼠與鍵盤觸發。若沒有開啟預覽，15 秒後自動復原。
+- 目前為靜態檢查通過，實際 Copy as image 截圖仍須於 Threads 瀏覽器實測。
 
 ## 本次修復
 - Beta 3：修正 Beta 2 在較窄 Threads 欄位時，Download 被放在「⋯」右方卻遭到頁面裁切的問題。按鈕不再參與標頭一般排版，改採貼文內定位；同時保留「⋯」位於 Download 左側的順序。
