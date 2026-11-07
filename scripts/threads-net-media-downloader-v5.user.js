@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Threads.net Media Downloader v5 (Maintained Beta)
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      5.1.0-beta.3
+// @version      5.1.0-beta.4
 // @description  One Download button per Threads post to save that post's photos and direct videos.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -57,22 +57,21 @@
   const ALLOWED_HOSTS = ['fbcdn.net', 'cdninstagram.com', 'threads.com', 'threads.net'];
   const installed = new WeakMap();
   const moreOriginalTranslate = new WeakMap();
-  const DOWNLOAD_WIDTH = 132;
-  const MORE_GAP = 20;
+  const MORE_GAP = 12;
   let scanTimer = null;
 
   const style = document.createElement('style');
   style.textContent = [
     '.' + BTN + '{display:inline-flex!important;align-items:center;justify-content:center;',
     'box-sizing:border-box;flex-shrink:0;vertical-align:middle;',
-    'margin-left:12px;padding:8px 16px;min-width:132px;height:40px;',
-    'font:500 18px/1.2 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;',
+    'margin-left:8px;padding:5px 10px;min-width:0;height:auto;min-height:28px;',
+    'font:500 13px/1.25 Arial,system-ui,sans-serif;letter-spacing:normal;',
     'color:#fff!important;background:#666!important;border:0;border-radius:5px;',
     'cursor:pointer;white-space:nowrap;box-shadow:none!important;}',
     '.' + BTN + ':hover{background:#777!important;}',
     '.' + BTN + ':disabled{opacity:.72;cursor:progress;}',
     '.' + BTN + '.tm-threads-v5-header{position:absolute!important;',
-    'right:12px;top:8px;width:132px;z-index:100;margin:0!important;}',
+    'right:12px;top:8px;z-index:100;margin:0!important;}',
   ].join('');
   (document.head || document.documentElement).appendChild(style);
 
@@ -348,9 +347,10 @@
     more.style.translate = moreOriginalTranslate.get(more);
     const m = more.getBoundingClientRect();
     const c = card.getBoundingClientRect();
-    const buttonHeight = 40;
-    const reserved = DOWNLOAD_WIDTH + MORE_GAP;
-    const originalRight = Math.min(c.right - 8, Math.max(c.left + DOWNLOAD_WIDTH + 8, m.right));
+    const buttonWidth = Math.max(48, Math.ceil(button.getBoundingClientRect().width));
+    const buttonHeight = Math.ceil(button.getBoundingClientRect().height) || 28;
+    const reserved = buttonWidth + MORE_GAP;
+    const originalRight = Math.min(c.right - 8, Math.max(c.left + buttonWidth + 8, m.right));
     button.style.right = Math.max(8, Math.round(c.right - originalRight)) + 'px';
     button.style.top = Math.max(0, Math.round(m.top - c.top +
       card.scrollTop + (m.height - buttonHeight) / 2)) + 'px';
@@ -403,5 +403,5 @@
     window.addEventListener('resize', schedule, { passive: true });
     schedule();
   }
-  console.info('[Threads v5 Maintained] 5.1.0-beta.3 loaded');
+  console.info('[Threads v5 Maintained] 5.1.0-beta.4 loaded');
 })();
