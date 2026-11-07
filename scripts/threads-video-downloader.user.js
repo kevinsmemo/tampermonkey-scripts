@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Threads Video Downloader (Privacy-Focused Fork)
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      2.0.0-beta.3
+// @version      2.0.0-beta.4
 // @description  One-click local downloads for visible Threads media, with narrow permissions and the original-style hover button.
 // @author       Manolo Zocco (original); kevinsmemo (fork maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -64,24 +64,27 @@
   const css = `
     .${MARK}-host { isolation: isolate; }
     .${MARK}-button {
-      position: absolute !important; top: 8px; right: 8px;
-      z-index: 2147483 !important; display: inline-flex !important;
-      align-items: center; gap: 6px; box-sizing: border-box;
-      width: 116px; height: 34px; padding: 0 12px; border: 0 !important;
-      border-radius: 8px; background: rgba(0,0,0,.72) !important;
-      color: #fff !important; font: 600 12px/1 sans-serif !important;
+      position: absolute !important; top: 7px; right: 7px;
+      z-index: 2147483 !important; display: flex !important;
+      flex-direction: row; justify-content: space-around; align-items: center;
+      box-sizing: border-box; width: 116px; height: 34px;
+      padding: 0 12px; border: 0 !important; border-radius: 8px;
+      background: rgba(0,0,0,.6) !important;
+      box-shadow: 0 2px 4px rgba(0,0,0,.3);
+      color: #fff !important; font: 600 11px/22px sans-serif !important;
+      letter-spacing: -.42px; text-transform: uppercase;
       cursor: pointer; opacity: 0; visibility: hidden;
-      transform: translateY(2px); transition: opacity .13s, transform .13s;
+      pointer-events: none; transition: opacity .13s ease;
       white-space: nowrap;
     }
     .${MARK}-host:hover > .${MARK}-button,
     .${MARK}-button:focus-visible,
     .${MARK}-button[data-busy='1'] {
-      visibility: visible; opacity: 1; transform: none;
+      visibility: visible; opacity: 1; pointer-events: auto;
     }
-    .${MARK}-button:hover { background: rgba(0,0,0,.92) !important; }
+    .${MARK}-button:hover { background: rgba(0,0,0,.8) !important; }
     .${MARK}-button:disabled { cursor: progress; }
-    .${MARK}-button svg { width: 16px; height: 16px; flex: none; }
+    .${MARK}-button svg { width: 20px; height: 20px; flex: none; }
   `;
   GM_addStyle(css);
 
@@ -224,7 +227,7 @@
     event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
     if (button.disabled) return;
     button.disabled = true;
-    button.dataset.busy = '1'; button.lastChild.textContent = '下載中…';
+    button.dataset.busy = '1'; button.querySelector('.tvd-label').textContent = '下載中…';
     try {
       const direct = currentMediaUrl(media);
       const url = direct || (media.tagName === 'VIDEO' ? embeddedVideoUrl(media) : null);
@@ -232,10 +235,10 @@
       const name = nameFor(media, url);
       try { await download(url, name); }
       catch { await fallbackDownload(url, name); }
-      button.lastChild.textContent = '已下載';
+      button.querySelector('.tvd-label').textContent = '已下載';
       button.title = '已送交瀏覽器下載。';
     } catch (error) {
-      button.lastChild.textContent = '無法下載';
+      button.querySelector('.tvd-label').textContent = '無法下載';
       button.title = '找不到可用的直接媒體網址，或下載被瀏覽器拒絕。可開啟原貼文再試。';
       console.warn('[Threads Downloader Maintained]', error);
     } finally {
@@ -243,7 +246,7 @@
       setTimeout(() => {
         if (!button.isConnected) return;
         button.disabled = false;
-        button.lastChild.textContent = 'Download';
+        button.querySelector('.tvd-label').textContent = 'Download';
       }, 2500);
     }
   }
@@ -278,8 +281,8 @@
     const h = host.getBoundingClientRect();
     // Offset from the actual media corner so even larger Threads wrappers
     // still place the button by its associated media, not the post edge.
-    button.style.top = Math.max(0, m.top - h.top + host.scrollTop + 8) + 'px';
-    button.style.right = Math.max(0, h.right - m.right + host.scrollLeft + 8) + 'px';
+    button.style.top = Math.max(0, m.top - h.top + host.scrollTop + 7) + 'px';
+    button.style.right = Math.max(0, h.right - m.right + host.scrollLeft + 7) + 'px';
   }
 
   function attachButton(media) {
@@ -294,7 +297,7 @@
     button.className = MARK + '-button';
     button.title = '下載這張 Threads 圖片或影片';
     button.setAttribute('aria-label', '下載 Threads 媒體');
-    button.innerHTML = '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3v10m0 0-4-4m4 4 4-4M4 16h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Download</span>';
+    button.innerHTML = '<span class="tvd-label">Download</span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3v9" stroke="white" stroke-width="2" stroke-linecap="round"/><path d="M6 10l4 4 4-4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="4" y="14" width="12" height="2" fill="white"/></svg>';
     button.addEventListener('click', event => handleClick(event, media, button), true);
     host.appendChild(button);
     buttons.set(media, { host, button });
@@ -334,5 +337,5 @@
     window.addEventListener('popstate', scheduleScan);
     scheduleScan();
   }
-  console.info('[Threads Downloader] v2.0.0-beta.3 active:', location.hostname);
+  console.info('[Threads Downloader] v2.0.0-beta.4 active:', location.hostname);
 })();
