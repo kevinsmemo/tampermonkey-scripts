@@ -134,8 +134,9 @@
   // Use a post's own carousel_media list: each entry is one attachment,
   // while video_versions 101/102/103 are quality choices for that attachment.
   function parsePostRecord(record) {
-    const carousel = Array.isArray(record.carousel_media) && record.carousel_media.length > 0;
-    const attachments = carousel ? record.carousel_media : [record.media || record];
+    const root = record.media && typeof record.media === 'object' ? record.media : record;
+    const carousel = Array.isArray(root.carousel_media) && root.carousel_media.length > 0;
+    const attachments = carousel ? root.carousel_media : [root];
     const files = [], seen = new Set();
     let unavailableVideos = 0;
     for (const raw of attachments.slice(0, 30)) {
@@ -278,7 +279,12 @@
     }
 
     let structured = collectStructuredPost(document, identity.code);
-    if (videoCount > 0 && (!structured.carousel ||
+    const carouselControls = !!card.querySelector(
+      '[aria-roledescription="carousel"],button[aria-label*="Next"],' +
+      'button[aria-label*="next"],button[aria-label*="下一"],'+
+      '[data-testid*="carousel"]'
+    );
+    if ((videoCount > 0 || carouselControls) && (!structured.carousel ||
         structured.unavailableVideos || structured.total < videoCount)) {
       const remote = await permalinkPostMedia(identity);
       if (remote) {
