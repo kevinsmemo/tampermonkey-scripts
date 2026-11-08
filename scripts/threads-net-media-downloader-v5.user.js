@@ -134,7 +134,11 @@
   // Use a post's own carousel_media list: each entry is one attachment,
   // while video_versions 101/102/103 are quality choices for that attachment.
   function parsePostRecord(record) {
-    const root = record.media && typeof record.media === 'object' ? record.media : record;
+    const nested = record.media;
+    const hasNestedMedia = nested && typeof nested === 'object' &&
+      (Array.isArray(nested.carousel_media) || Array.isArray(nested.video_versions) ||
+       !!nested.image_versions2);
+    const root = hasNestedMedia ? nested : record;
     const carousel = Array.isArray(root.carousel_media) && root.carousel_media.length > 0;
     const attachments = carousel ? root.carousel_media : [root];
     const files = [], seen = new Set();
@@ -294,8 +298,11 @@
     }
     // Carousel record preserves order and off-screen attachments. With only a
     // single structured item, use DOM instead when it exposes more actual URLs.
+    const structuredVideos = structured.files.filter(f => f.type === 'video').length;
+    const directVideos = domFiles.filter(f => f.type === 'video').length;
     const useStructured = structured.files.length > 0 &&
-      (structured.carousel || structured.files.length >= domFiles.length);
+      (structured.carousel ? structuredVideos >= directVideos :
+       structured.files.length >= domFiles.length);
     return {
       result: useStructured ? structured.files : domFiles,
       unavailableVideos: useStructured ? structured.unavailableVideos : unresolvedDOMVideos,
