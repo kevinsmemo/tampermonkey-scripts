@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Threads.net Media Downloader v5 (Maintained Beta)
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      5.1.0-beta.5
+// @version      5.1.0-beta.6
 // @description  One Download button per Threads post to save that post's photos and direct videos.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -131,44 +131,98 @@
     return url || mediaURL(element.currentSrc || element.src);
   }
 
-  function structuredVideoURL(postCode) {
-    // Only use JSON demonstrably associated with the clicked post.
-    // When the video cannot be disambiguated, fail rather than download the
-    // wrong post's media. This is a limited fallback, not a guaranteed fix
-    // for blob/adaptive streams.
-    const found = new Set();
-    const scripts = document.querySelectorAll(
+  // Use a post's own carousel_media list: each entry is one attachment,
+  // while video_versions 101/102/103 are quality choices for that attachment.
+  function parsePostRecord(record) {
+    const carousel = Array.isArray(record.carousel_media) && record.carousel_media.length > 0;
+    const attachments = carousel ? record.carousel_media : [record.media || record];
+    const files = [], seen = new Set();
+    let unavailableVideos = 0;
+    for (const raw of attachments.slice(0, 30)) {
+      const item = raw?.node || raw?.media || raw;
+      if (!item || typeof item !== 'object') continue;
+      const versions = Array.isArray(item.video_versions) ? item.video_versions : [];
+      const isVideo = versions.length > 0 || item.media_type === 2 ||
+        String(item.media_type || '').toUpperCase() === 'VIDEO';
+      let url = null;
+      if (isVideo) {
+        const candidates = versions.map((v, i) => ({
+          url: mediaURL(v?.url || v?.src),
+          pixels: (Number(v?.width) || 0) * (Number(v?.height) || 0), i
+        })).filter(v => v.url).sort((a, b) => b.pixels - a.pixels || a.i - b.i);
+        url = candidates[0]?.url || mediaURL(item.video_url);
+        if (!url) unavailableVideos++;
+      } else {
+        const candidates = Array.isArray(item.image_versions2?.candidates)
+          ? item.image_versions2.candidates : [];
+        const images = candidates.map((v, i) => ({
+          url: mediaURL(v?.url || v?.src),
+          pixels: (Number(v?.width) || 0) * (Number(v?.height) || 0), i
+        })).filter(v => v.url).sort((a, b) => b.pixels - a.pixels || a.i - b.i);
+        url = images[0]?.url || mediaURL(item.image_versions2?.url);
+      }
+      if (!url) continue;
+      const parsed = new URL(url);
+      const key = parsed.origin + parsed.pathname;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      files.push({ type: isVideo ? 'video' : 'image', url });
+    }
+    return { files, total: attachments.length, unavailableVideos, carousel };
+  }
+
+  function collectStructuredPost(doc, postCode) {
+    let best = { files: [], total: 0, unavailableVideos: 0, carousel: false };
+    const scripts = doc.querySelectorAll(
       'script[type="application/json"],script[type="application/ld+json"]'
     );
     for (const script of scripts) {
       const content = script.textContent || '';
       if (content.length > 4000000 || !content.includes(postCode) ||
-          !content.includes('video_versions')) continue;
+          !/(video_versions|carousel_media|image_versions2)/.test(content)) continue;
       let root;
       try { root = JSON.parse(content); } catch (_) { continue; }
       let seen = 0;
-      function walk(node, matched, depth) {
-        if (!node || typeof node !== 'object' || depth > 30 || ++seen > 18000) return;
+      function walk(node, depth) {
+        if (!node || typeof node !== 'object' || depth > 32 || ++seen > 25000) return;
         if (Array.isArray(node)) {
-          node.forEach(item => walk(item, matched, depth + 1));
+          for (const child of node) walk(child, depth + 1);
           return;
         }
-        const nodeCode = node.code || node.shortcode || node.post_code;
-        const same = matched || nodeCode === postCode;
-        if (same && Array.isArray(node.video_versions)) {
-          const variants = node.video_versions.map(item => ({
-            url: mediaURL(item?.url || item?.src),
-            area: (Number(item?.width) || 0) * (Number(item?.height) || 0),
-          })).filter(x => x.url).sort((a, b) => b.area - a.area);
-          if (variants[0]) found.add(variants[0].url);
+        const code = node.code || node.shortcode || node.post_code || node.postCode;
+        if (code === postCode) {
+          const candidate = parsePostRecord(node);
+          const score = (candidate.carousel ? 1000 : 0) + candidate.files.length * 20 + candidate.total;
+          const current = (best.carousel ? 1000 : 0) + best.files.length * 20 + best.total;
+          if (candidate.files.length && score > current) best = candidate;
         }
         for (const [key, value] of Object.entries(node)) {
-          if (key !== 'video_versions') walk(value, same, depth + 1);
+          if (key !== 'video_versions' && key !== 'image_versions2') walk(value, depth + 1);
         }
       }
-      walk(root, false, 0);
+      walk(root, 0);
     }
-    return found.size === 1 ? [...found][0] : null;
+    return best;
+  }
+
+  async function permalinkPostMedia(identity) {
+    // Same-origin, explicit-click GET. No proxy or third-party downloader.
+    try {
+      const path = '/@' + encodeURIComponent(identity.user) + '/post/' +
+        encodeURIComponent(identity.code);
+      const response = await fetch(new URL(path, location.origin), {
+        method: 'GET', credentials: 'same-origin',
+        redirect: 'error', cache: 'no-store', headers: { Accept: 'text/html' }
+      });
+      if (!response.ok) return null;
+      const html = await response.text();
+      if (html.length > 8000000) return null;
+      return collectStructuredPost(
+        new DOMParser().parseFromString(html, 'text/html'), identity.code
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   function safeFilenameSegment(input, fallback = 'Threads') {
@@ -203,26 +257,43 @@
     return rect.width >= 150 && rect.height >= 110 && !element.closest('header,nav,aside');
   }
 
-  function mediaInPost(card, identity) {
+  async function mediaInPost(card, identity) {
     const nodes = [...card.querySelectorAll(MEDIA_SELECTOR)]
       .filter(node => belongsToPost(node, identity));
-    const seen = new Set();
-    const result = [];
-    let unavailableVideos = 0;
-    const videos = nodes.filter(n => n.tagName === 'VIDEO');
-    const jsonFallback = videos.length === 1 ? structuredVideoURL(identity.code) : null;
+    const domFiles = [], seen = new Set();
+    let unresolvedDOMVideos = 0;
+    const videoCount = nodes.filter(node => node.tagName === 'VIDEO').length;
     for (const node of nodes) {
       const type = node.tagName === 'VIDEO' ? 'video' : 'image';
-      const url = directURL(node) || (type === 'video' ? jsonFallback : null);
+      const url = directURL(node);
       if (!url) {
-        if (type === 'video') unavailableVideos++;
+        if (type === 'video') unresolvedDOMVideos++;
         continue;
       }
-      if (seen.has(url)) continue;
-      seen.add(url);
-      result.push({ type, url });
+      const parsed = new URL(url);
+      const key = parsed.origin + parsed.pathname;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      domFiles.push({ type, url });
     }
-    return { result, unavailableVideos };
+
+    let structured = collectStructuredPost(document, identity.code);
+    if (videoCount > 0 && (!structured.carousel ||
+        structured.unavailableVideos || structured.total < videoCount)) {
+      const remote = await permalinkPostMedia(identity);
+      if (remote) {
+        const rank = p => (p.carousel ? 1000 : 0) + p.files.length * 20 + p.total;
+        if (rank(remote) > rank(structured)) structured = remote;
+      }
+    }
+    // Carousel record preserves order and off-screen attachments. With only a
+    // single structured item, use DOM instead when it exposes more actual URLs.
+    const useStructured = structured.files.length > 0 &&
+      (structured.carousel || structured.files.length >= domFiles.length);
+    return {
+      result: useStructured ? structured.files : domFiles,
+      unavailableVideos: useStructured ? structured.unavailableVideos : unresolvedDOMVideos,
+    };
   }
 
   function downloadOne(url, filename) {
@@ -245,7 +316,8 @@
     button.disabled = true;
     let failures = 0;
     try {
-      const { result: files, unavailableVideos } = mediaInPost(card, identity);
+      button.textContent = '解析中…';
+      const { result: files, unavailableVideos } = await mediaInPost(card, identity);
       if (!files.length) {
         button.textContent = unavailableVideos ? '影片無法下載' : '無可下載媒體';
         return;
@@ -503,5 +575,5 @@
     window.addEventListener('resize', schedule, { passive: true });
     schedule();
   }
-  console.info('[Threads v5 Maintained] 5.1.0-beta.5 loaded');
+  console.info('[Threads v5 Maintained] 5.1.0-beta.6 loaded');
 })();
