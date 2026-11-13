@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Threads.net Media Downloader v5 (Maintained Beta)
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      5.1.0-beta.6
+// @version      5.1.0-beta.7
 // @description  One Download button per Threads post to save that post's photos and direct videos.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -210,6 +210,25 @@
     return best;
   }
 
+  // Canonical post pages may expose one original MP4 in Open Graph metadata
+  // even when the dynamic player uses a blob: URL. This stays on the same
+  // Threads origin and only accepts permitted HTTPS media hosts.
+  function videoFromCanonicalMeta(doc) {
+    const selectors = [
+      'meta[property="og:video:secure_url"]',
+      'meta[property="og:video:url"]',
+      'meta[property="og:video"]',
+      'meta[name="twitter:player:stream"]',
+    ];
+    for (const selector of selectors) {
+      const node = doc.querySelector(selector);
+      const raw = node?.getAttribute('content');
+      const url = mediaURL(raw);
+      if (url && !/\.(?:mpd|m3u8|m4s|ts)(?:$|[?#])/i.test(url)) return url;
+    }
+    return null;
+  }
+
   async function permalinkPostMedia(identity) {
     // Same-origin, explicit-click GET. No proxy or third-party downloader.
     try {
@@ -222,9 +241,16 @@
       if (!response.ok) return null;
       const html = await response.text();
       if (html.length > 8000000) return null;
-      return collectStructuredPost(
-        new DOMParser().parseFromString(html, 'text/html'), identity.code
-      );
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const structured = collectStructuredPost(doc, identity.code);
+      if (structured.files.length) return structured;
+      // Use og:video only on the explicitly requested canonical post page,
+      // never from the current feed or an unrelated suggested post.
+      const mp4 = videoFromCanonicalMeta(doc);
+      return mp4 ? {
+        files: [{ type: 'video', url: mp4 }],
+        total: 1, unavailableVideos: 0, carousel: false
+      } : structured;
     } catch (_) {
       return null;
     }
@@ -332,7 +358,23 @@
       button.textContent = '解析中…';
       const { result: files, unavailableVideos } = await mediaInPost(card, identity);
       if (!files.length) {
+        const videos = [...card.querySelectorAll('video')];
+        const hasBlob = videos.some(v => [v.currentSrc, v.src].some(
+          url => typeof url === 'string' && url.startsWith('blob:')
+        ));
+        const hasStreaming = videos.some(v => [v.currentSrc, v.src].some(
+          url => /\.(?:m3u8|mpd)(?:$|[?#])/i.test(url || '')
+        ));
         button.textContent = unavailableVideos ? '影片無法下載' : '無可下載媒體';
+        button.title = unavailableVideos
+          ? (hasBlob ? '這則影片目前只有 blob: 播放來源，尚未找到可直接下載的 HTTPS 影片網址。' :
+             hasStreaming ? '目前取得的是串流播放清單，而非可直接下載的 MP4。' :
+             'Threads 未提供這則貼文可辨識的影片直連網址。')
+          : '目前找不到這則貼文可下載的媒體，請先確認已開啟原始貼文。';
+        console.warn('[Threads v5 Maintained] No direct download URL', {
+          postCode: identity.code, unavailableVideos,
+          blobPlayer: hasBlob, streamPlaylist: hasStreaming
+        });
         return;
       }
       const stamp = getTimestamp(card);
@@ -344,7 +386,13 @@
         try { await downloadOne(file.url, name); }
         catch (error) {
           failures++;
-          console.warn('[Threads v5 Maintained] Download failed', error);
+          const reason = String(error?.error || error?.message || error || 'unknown');
+          button.title = '下載請求失敗：' + reason.slice(0, 120) +
+            '。請確認 Tampermonkey 下載權限，或來源 CDN 是否拒絕請求。';
+          console.warn('[Threads v5 Maintained] Download failed', {
+            postCode: identity.code, mediaIndex: i + 1,
+            reason, host: new URL(file.url).hostname
+          });
         }
       }
       button.textContent = failures ? ('失敗 ' + failures + '/' + files.length) :
@@ -588,5 +636,5 @@
     window.addEventListener('resize', schedule, { passive: true });
     schedule();
   }
-  console.info('[Threads v5 Maintained] 5.1.0-beta.6 loaded');
+  console.info('[Threads v5 Maintained] 5.1.0-beta.7 loaded');
 })();
