@@ -243,7 +243,8 @@
       if (html.length > 8000000) return null;
       const doc = new DOMParser().parseFromString(html, 'text/html');
       const structured = collectStructuredPost(doc, identity.code);
-      if (structured.files.length) return structured;
+      if (structured.carousel || structured.files.some(file => file.type === 'video'))
+        return structured;
       // Use og:video only on the explicitly requested canonical post page,
       // never from the current feed or an unrelated suggested post.
       const mp4 = videoFromCanonicalMeta(doc);
