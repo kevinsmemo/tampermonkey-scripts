@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Threads.net Media Downloader v5 (Maintained Beta)
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      5.1.0-beta.7
+// @version      5.1.0-beta.8
 // @description  One Download button per Threads post to save that post's photos and direct videos.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -276,22 +276,32 @@
     return match ? '.' + match[1].toLowerCase() : type === 'video' ? '.mp4' : '.jpg';
   }
 
-  function belongsToPost(element, identity) {
+  function belongsToPost(element, identity, card) {
+    if (!card.contains(element)) return false;
     const mediaLink = element.closest('a[href*="/media"]');
     if (mediaLink) {
       const mediaOwner = identityFrom(mediaLink.href);
       if (mediaOwner && mediaOwner.code !== identity.code) return false;
     }
+    // Nested quoted posts and linked replies may themselves be articles. Do
+    // not mistake their media for the active reply's own media.
+    for (let node = element.parentElement; node && node !== card;
+         node = node.parentElement) {
+      if (!node.matches('article,[role="article"]')) continue;
+      const codes = postTimeCodes(node);
+      if (codes.size && !codes.has(identity.code)) return false;
+    }
     if (element.tagName === 'VIDEO') return true;
     if (/profile picture|avatar|頭像|大頭貼/i.test(element.alt || '')) return false;
     if (mediaLink) return true;
     const rect = element.getBoundingClientRect();
-    return rect.width >= 150 && rect.height >= 110 && !element.closest('header,nav,aside');
+    return rect.width >= 150 && rect.height >= 110 &&
+      !element.closest('header,nav,aside');
   }
 
   async function mediaInPost(card, identity) {
     const nodes = [...card.querySelectorAll(MEDIA_SELECTOR)]
-      .filter(node => belongsToPost(node, identity));
+      .filter(node => belongsToPost(node, identity, card));
     const domFiles = [], seen = new Set();
     let unresolvedDOMVideos = 0;
     const videoCount = nodes.filter(node => node.tagName === 'VIDEO').length;
@@ -327,9 +337,10 @@
     // single structured item, use DOM instead when it exposes more actual URLs.
     const structuredVideos = structured.files.filter(f => f.type === 'video').length;
     const directVideos = domFiles.filter(f => f.type === 'video').length;
+    // Never replace a real reply video with a static parent/preview image.
     const useStructured = structured.files.length > 0 &&
-      (structured.carousel ? structuredVideos >= directVideos :
-       structured.files.length >= domFiles.length);
+      structuredVideos >= directVideos &&
+      (structured.carousel || structured.files.length >= domFiles.length);
     return {
       result: useStructured ? structured.files : domFiles,
       unavailableVideos: useStructured ? structured.unavailableVideos : unresolvedDOMVideos,
@@ -427,23 +438,42 @@
     );
   }
 
-  function findCard(anchor, identity) {
-    const semanticCard = anchor.closest('article,[role="article"]');
-    if (semanticCard) return semanticCard;
-    let node = anchor.parentElement;
-    let candidate = null;
-    for (let depth = 0; depth < 14 && node && node !== document.body; depth++, node = node.parentElement) {
-      const bounds = node.getBoundingClientRect();
-      if (bounds.width < 240 || bounds.height < 95) continue;
-      const links = [...node.querySelectorAll(POST_LINK)].map(a => identityFrom(a.href)?.code).filter(Boolean);
-      const codes = new Set(links);
-      if (!codes.has(identity.code)) continue;
-      if (codes.size > 2) break;
-      const hasMedia = !!node.querySelector(MEDIA_SELECTOR);
-      if (hasMedia) candidate = node;
-      if (hasActions(node) && (hasMedia || depth >= 3)) return node;
+  function postTimeCodes(container) {
+    const codes = new Set();
+    for (const link of container.querySelectorAll(POST_LINK)) {
+      if (!isTimeLink(link)) continue;
+      const code = identityFrom(link.href)?.code;
+      if (code) codes.add(code);
+      if (codes.size > 1) break;
     }
-    return candidate;
+    return codes;
+  }
+
+  function findCard(anchor, identity) {
+    // Do not blindly return anchor.closest('article'): Threads may use one
+    // semantic article for the parent post AND the whole reply thread.
+    // The selected node must contain exactly one *timestamp* post identity.
+    // Ordinary links and media URLs pointing to a parent post are not headers.
+    let node = anchor.parentElement;
+    let bestWithActions = null;
+    let bestWithMedia = null;
+    for (let depth = 0; depth < 18 && node &&
+         node !== document.body && node !== document.documentElement;
+         depth++, node = node.parentElement) {
+      const codes = postTimeCodes(node);
+      if (codes.size > 1 || (codes.size && !codes.has(identity.code))) break;
+      const bounds = node.getBoundingClientRect();
+      if (bounds.width < 190 || bounds.height < 80) continue;
+      const hasMedia = !!node.querySelector(MEDIA_SELECTOR);
+      const actions = hasActions(node);
+      // Prefer the first sufficiently complete post component. Never expand
+      // into an ancestor that includes another reply's timestamp.
+      if (actions && (hasMedia || depth >= 3) && !bestWithActions) {
+        bestWithActions = node;
+      }
+      if (hasMedia && !bestWithMedia) bestWithMedia = node;
+    }
+    return bestWithActions || bestWithMedia;
   }
 
   function findMoreControl(card, anchor) {
@@ -596,8 +626,19 @@
     const identity = identityFrom(anchor.href);
     const card = findCard(anchor, identity);
     if (!card) return;
+    const codes = postTimeCodes(card);
+    if (codes.size !== 1 || !codes.has(identity.code)) return;
     const existing = installed.get(card);
     if (existing && existing.button.isConnected) {
+      // A shared DOM container is not proof two timestamps refer to the same
+      // post. Never silently reuse the parent's button for a reply.
+      if (existing.code !== identity.code) {
+        console.warn('[Threads v5 Maintained] Ambiguous post card; ' +
+          'skipping cross-post Download binding', {
+            requestedCode: identity.code, attachedCode: existing.code
+          });
+        return;
+      }
       layoutHeaderActions(card, existing.button, existing.more);
       return;
     }
@@ -637,5 +678,5 @@
     window.addEventListener('resize', schedule, { passive: true });
     schedule();
   }
-  console.info('[Threads v5 Maintained] 5.1.0-beta.7 loaded');
+  console.info('[Threads v5 Maintained] 5.1.0-beta.8 loaded');
 })();
