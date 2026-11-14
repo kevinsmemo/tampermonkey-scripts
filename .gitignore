@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key
+*.har
+*.log
+*.cookies*
+*.session*
+credentials.json
+secrets.json
+node_modules/
+.DS_Store
