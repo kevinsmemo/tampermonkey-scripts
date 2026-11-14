@@ -6,7 +6,7 @@
 與 Manolo Zocco 的 Threads Video Downloader 不同。先前誤用的草稿已從本 PR 移除。
 
 ## 目前測試版
-- 版本：5.1.0-beta.7
+- 版本：5.1.0-beta.8
 - 安裝網址：https://raw.githubusercontent.com/kevinsmemo/tampermonkey-scripts/refs/heads/feat/threads-downloader-privacy-first/scripts/threads-net-media-downloader-v5.user.js
 - Pull Request：https://github.com/kevinsmemo/tampermonkey-scripts/pull/1
 - 每則貼文常駐一個灰色 Download 按鈕，位置保留在標頭「⋯」右側。Beta 4 改用緊湊自適應大小，不再硬設最小寬 132px、高 40px、字體 18px；保留貼文內定位，按實際按鈕寬度調整「⋯」的位置。
@@ -20,7 +20,7 @@
 2. 點擊上述安裝網址；若只顯示原始碼，請在 Tampermonkey 的 Utilities / Install from URL 貼上連結。
 3. 開啟 https://www.threads.com/ 並重新整理，確認每則貼文右上方的 Download。
 4. 先測公開單圖，再測多圖、影片；可能需要同意瀏覽器的多檔下載權限。
-5. 如果看不到按鈕，先確認腳本已啟用，Console 應出現 [Threads v5 Maintained] 5.1.0-beta.7 loaded。
+5. 如果看不到按鈕，先確認腳本已啟用，Console 應出現 [Threads v5 Maintained] 5.1.0-beta.8 loaded。
 
 ## Copy as image 截圖排除
 - Beta 5：使用 Threads 分享選單的 Copy as image 時，在原生截圖動作發生前暫時移除所有 Download 按鈕，避免被截進圖片；預覽關閉後再恢復。
@@ -44,6 +44,12 @@
 - 若原始貼文頁面有 `og:video` HTTPS 直連，現在會作為同源、使用者點擊時才讀取的備援；僅允許 Meta/Threads 的媒體主機，拒絕 m3u8、mpd 等串流清單。
 - 區分「找不到直連／只有 blob 串流播放器」與「GM_download 被拒絕」：失敗時滑鼠停在按鈕上可看提示，Console 也記錄原因（不記錄完整媒體 URL）。
 - 這項修正已通過語法與 5 組合成資料檢查，尚未在使用者指定的影片頁面實測。保留原本按鈕大小、位置與 Copy as image 功能。
+
+## 原文與回覆分離修復（Beta 8）
+- 使用者回報在 Threads 貼文下的回覆影片點 Download，實際卻下載原文圖片；根因是先前 findCard 可選取共用的 article／父層，且影片的歸屬判斷過於寬鬆。
+- 現在以貼文時間連結與獨立 shortcode 決定每則貼文最小安全容器，拒絕跨貼文媒體；遇到一個容器包含多則貼文時不建立不確定的 Download 綁定。
+- 媒體來源同時檢查目前的 card、/media URL 及內嵌文章，避免回覆誤抓原文圖片；當 DOM 實際影片已可辨識時不讓結構化圖片取代影片。
+- 已完成語法檢查與 7 組模擬 DOM 驗證（原文／回覆獨立識別、共用外層 article、跨貼文排除），但尚未取得所提供短連結的實際回覆頁面，因此無法視為端對端驗證通過。
 
 ## 已知限制
 - 尚未通過 Chrome / Threads 的端到端實測。網站 DOM 改版可能造成特定貼文不顯示按鈕或漏抓媒體。
