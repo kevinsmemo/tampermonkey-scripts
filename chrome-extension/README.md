@@ -1,4 +1,4 @@
-# YouTube Slides Extractor — Chrome Extension (Cloud Alpha)
+# YouTube Slides Extractor — Chrome Extension v0.3.2 (Cloud Alpha)
 
 ## 安裝與連接
 
@@ -10,8 +10,14 @@
 
 固定擴充套件 ID：kbghnfojpidgmkfmjnajikpnhgcpphan
 
+## v0.3.2
+- 簡化登入畫面與 Google Drive 同步儀表板，提供綁定資料夾連結、待同步數量、最近成功上傳時間、連線檢查及重新授權。
+- YouTube 面板顯示待同步數量；狀態只在面板開啟時定期讀取本機資料庫，不會因此讀取雲端圖片。
+- 新增手動檢查 GitHub 版本：僅在主動點擊時請求選用的 GitHub 讀取權限，下載更新仍須覆蓋原資料夾並重新載入。
+- 既有 OAuth Client ID、固定擴充套件 ID、資料庫及綁定設定不變。
+
 ## Alpha 限制
-- 未驗證真實 Google OAuth、Drive API、Chrome 擴充套件端到端流程。程式語法與離線／重試流程通過模擬測試。
+- v0.3.1 已由使用者回報成功登入與同步；v0.3.2 尚待實際 Chrome 端驗證。
 - 不會移動或刪除舊版 Drive PNG。刪除功能暫停。
 - 本機離線擷取不需要 OAuth；同步需 Google 帳號授權，測試版需列為測試使用者。離線待上傳 PNG 保存在擴充套件 IndexedDB；成功上傳後本機備份仍保留，可能占用磁碟。雲端既有圖片需連線讀取，非全量離線副本。
 - 單張傳輸上限 24 MiB（超過須匯出 ZIP）。卸載擴充套件之前請先確定同步完成／匯出備份；同一安裝綁定一個帳號與資料夾。
