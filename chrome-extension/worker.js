@@ -13,7 +13,20 @@ function read(store,k){return tx([store],'readonly',(t,done)=>{const r=t.objectS
 function records(index,k){return tx(['meta'],'readonly',(t,done)=>{const os=t.objectStore('meta'),r=index?os.index(index).getAll(k):os.getAll();r.onsuccess=()=>done(r.result);});}
 function saveRecord(r,blob){return tx(['meta','bytes'],'readwrite',(t,done)=>{t.objectStore('meta').put(r);if(blob)t.objectStore('bytes').put(blob,r.key);done(r);});}
 async function config(){return (await chrome.storage.local.get('config')).config||null;}
-async function state(){const c=await config(),pending=await records('state','pending'),summary=(await chrome.storage.local.get('lastSync')).lastSync||'';return {connected:!!c,pending:pending.length,mode:c?.mode||'',lastSync:summary,clientConfigured:!!chrome.runtime.getManifest().oauth2?.client_id};}
+let syncRunning=false;
+function pendingCount(){return tx(['meta'],'readonly',(t,done)=>{const r=t.objectStore('meta').index('state').count('pending');r.onsuccess=()=>done(r.result);});}
+async function updateHealth(patch){const old=(await chrome.storage.local.get('syncHealth')).syncHealth||{};await chrome.storage.local.set({syncHealth:{...old,...patch}});}
+async function state(){
+ const c=await config(),pending=await pendingCount(),data=await chrome.storage.local.get(['lastSync','syncHealth']),health=data.syncHealth||{};
+ return {connected:!!c,pending,mode:c?.mode||'',lastSync:data.lastSync||'',syncing:syncRunning,lastCheckedAt:health.lastCheckedAt||0,lastUploadedAt:health.lastUploadedAt||0,checkError:health.checkError||'',syncError:health.syncError||'',clientConfigured:!!chrome.runtime.getManifest().oauth2?.client_id};
+}
+async function details(){const c=await config();return {...await state(),root:c?.root||'',rootName:c?.rootName||''};}
+async function verifyConnection(){
+ const c=await config();if(!c)throw Error('尚未登入 Google Drive');
+ try{const t=await auth(c);await checkRoot(t,c);await updateHealth({lastCheckedAt:Date.now(),checkError:''});}
+ catch(e){await updateHealth({checkError:String(e?.message||e).slice(0,240)});throw e;}
+ return state();
+}
 function qstr(s){return "'"+String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"'";}
 async function token(scope,interactive=false){if(!chrome.runtime.getManifest().oauth2?.client_id)throw Error('請先在本機設定 OAuth Client ID（setup.html）');const r=await chrome.identity.getAuthToken({interactive,scopes:[scope]});const value=typeof r==='string'?r:r?.token;if(!value)throw Error('尚未授權 Google 帳號');if(r?.grantedScopes&&!r.grantedScopes.includes(scope))throw Error('未取得需要的 Drive 權限');return value;}
 async function fetchApi(t,url,opts={}){
@@ -59,37 +72,60 @@ async function index(){const c=await config();let warning='';
  }catch(e){warning='雲端索引更新未完整完成：'+e.message+'；保留本機資料';}
  const groups=new Map();for(const r of await records()){const x=groups.get(r.videoId)||{videoId:r.videoId,count:0,title:''};x.count++;if(r.title)x.title=r.title;groups.set(r.videoId,x);}return {rows:[...groups.values()],warning,state:await state()};}
 async function connect(m){const current=await config(),mode=m.mode==='existing'?'existing':'new',scope=mode==='existing'?ALL_SCOPE:FILE_SCOPE,t=await token(scope,true),who=await owner(t);
- if(current){if(current.owner!==who||current.mode!==mode)throw Error('此安裝已綁定另一帳號／模式；不會轉送現有離線資料');await checkRoot(t,current);return state();}
+ if(current){if(current.owner!==who||current.mode!==mode)throw Error('此安裝已綁定另一帳號／模式；不會轉送現有離線資料');await checkRoot(t,current);await updateHealth({lastCheckedAt:Date.now(),checkError:''});return state();}
  let root,rootName;
  if(mode==='existing'){const raw=String(m.folder||'').trim(),id=raw.match(/\/folders\/([A-Za-z0-9_-]+)/)?.[1]||raw;if(!/^[A-Za-z0-9_-]{10,150}$/.test(id))throw Error('請輸入 YouTube Slides 資料夾網址或 ID');
  const r=await json(t,'/files/'+encodeURIComponent(id)+'?fields=id,name,mimeType,trashed');if(r.trashed||r.mimeType!==FOLDER||r.name!=='YouTube Slides')throw Error('僅接受名稱正確的 YouTube Slides 資料夾');root=r.id;rootName=r.name;
  }else{rootName='YouTube Slides - API';root=await folder(t,'root',rootName,true);}
- await chrome.storage.local.set({config:{root,rootName,mode,scope,owner:who}});return state();}
+ await chrome.storage.local.set({config:{root,rootName,mode,scope,owner:who}});await updateHealth({lastCheckedAt:Date.now(),checkError:''});return state();}
 async function uploadOne(t,c,r){const blob=await read('bytes',r.key);if(!blob)throw Error('找不到離線原圖');const dir=await folder(t,c.root,r.videoId,true),matches=await children(t,dir,'name = '+qstr(r.name));let uploaded;
  if(matches.length){if(matches.length!==1||matches[0].mimeType!=='image/png'||Number(matches[0].size)!==blob.size)throw Error('同名衝突，停止覆寫');const existing=await (await fetchApi(t,API+'/files/'+encodeURIComponent(matches[0].id)+'?alt=media')).blob();if(!await equal(existing,blob))throw Error('同名衝突，保留原始檔案');uploaded=matches[0];}
  else{const boundary='dg_'+crypto.randomUUID().replace(/-/g,'');const body=new Blob(['--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:r.name,mimeType:'image/png',parents:[dir]})+'\r\n--'+boundary+'\r\nContent-Type: image/png\r\n\r\n',blob,'\r\n--'+boundary+'--\r\n']);
  uploaded=await (await fetchApi(t,UPLOAD+'?uploadType=multipart&fields=id,name,size,modifiedTime',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},body})).json();if(!uploaded.id||uploaded.name!==r.name||Number(uploaded.size)!==blob.size)throw Error('Google Drive 未完整確認上傳');}
  await saveRecord({...r,state:'cloud',driveId:uploaded.id,modified:Date.parse(uploaded.modifiedTime)||r.modified});}
 async function arm(){if(await config()&&!await chrome.alarms.get('slides-sync'))await chrome.alarms.create('slides-sync',{periodInMinutes:1});}
-async function flush(){const c=await config();if(!c)return state();const pending=await records('state','pending');if(!pending.length){await chrome.alarms.clear('slides-sync');return state();}
- try{const t=await auth(c);await checkRoot(t,c);for(const r of pending.slice(0,5))await uploadOne(t,c,r);await chrome.storage.local.set({lastSync:'同步批次完成 '+new Date().toLocaleString()});}catch(e){await chrome.storage.local.set({lastSync:'待同步：'+e.message});}
- if((await records('state','pending')).length)await arm();else await chrome.alarms.clear('slides-sync');return state();}
+async function reconcileAlarm(){
+ if(await pendingCount())await arm();else{await chrome.alarms.clear('slides-sync');if(await pendingCount())await arm();}
+}
+async function flush(checkWhenEmpty=false){
+ const c=await config();if(!c)return state();
+ const pending=await records('state','pending');
+ if(!pending.length){await reconcileAlarm();if(checkWhenEmpty)await verifyConnection();return state();}
+ syncRunning=true;let uploaded=0,verified=false;
+ try{
+  const t=await auth(c);await checkRoot(t,c);verified=true;
+  await updateHealth({lastCheckedAt:Date.now(),checkError:''});
+  for(const r of pending.slice(0,5)){await uploadOne(t,c,r);uploaded++;}
+  await updateHealth({syncError:'',...(uploaded?{lastUploadedAt:Date.now()}:{})});
+  await chrome.storage.local.set({lastSync:'同步批次完成 '+new Date().toLocaleString()});
+ }catch(e){
+  const message=String(e?.message||e).slice(0,240);
+  await updateHealth({syncError:message,...(!verified?{checkError:message}:{}),...(uploaded?{lastUploadedAt:Date.now()}:{})});
+  await chrome.storage.local.set({lastSync:'待同步：'+message});
+ }finally{syncRunning=false;await reconcileAlarm();}
+ return state();
+}
 chrome.alarms.onAlarm.addListener(a=>{if(a.name==='slides-sync')void queue(flush).catch(()=>{});});
-chrome.runtime.onStartup.addListener(()=>void queue(async()=>{if((await records('state','pending')).length)await arm();}).catch(()=>{}));
+const resumePending=()=>void queue(async()=>{if(await pendingCount())await arm();}).catch(()=>{});
+chrome.runtime.onStartup.addListener(resumePending);
+chrome.runtime.onInstalled.addListener(resumePending);
 chrome.action.onClicked.addListener(()=>void chrome.runtime.openOptionsPage());
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  if(sender.id!==chrome.runtime.id||!m||typeof m.type!=='string')return false;
  const options=sender.url===chrome.runtime.getURL('options.html'),yt=/^https:\/\/(?:www|m)\.youtube\.com\//.test(sender.url||'');
- if(!options&&!yt)return false;if(['connect','syncNow'].includes(m.type)&&!options)return false;
+ if(!options&&!yt)return false;if(['connect','syncNow','details','verify'].includes(m.type)&&!options)return false;
  if(['put','get','list'].includes(m.type)&&(!ID.test(m.videoId||'')||(['put','get'].includes(m.type)&&!NAME.test(m.name||'')))){reply({ok:false,error:'Invalid video or filename'});return false;}
  (async()=>{let data;switch(m.type){
  case 'status':data=await state();break;
+ case 'details':data=await details();break;
+ case 'verify':data=await queue(verifyConnection);break;
  case 'options':await chrome.runtime.openOptionsPage();data=true;break;
  case 'connect':data=await queue(()=>connect(m));await arm();void queue(flush).catch(()=>{});break;
  case 'put':data=await queueWrite(()=>put(m));try{await arm();}catch(_){}break;
  case 'list':data=await queue(()=>catalog(m.videoId));break;
  case 'get':data=await queue(()=>get(m));break;
  case 'index':data=await queue(index);break;
- case 'sync':case 'syncNow':data=await queue(flush);break;
+ case 'sync':data=await queue(flush);break;
+ case 'syncNow':data=await queue(()=>flush(true));break;
  default:throw Error('Unsupported operation');}reply({ok:true,data});})().catch(e=>reply({ok:false,error:String(e.message||e).slice(0,240)}));return true;
 });
