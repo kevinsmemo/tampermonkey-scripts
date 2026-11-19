@@ -4,7 +4,8 @@ const API='https://www.googleapis.com/drive/v3',UPLOAD='https://www.googleapis.c
 const FOLDER='application/vnd.google-apps.folder',LIMIT=24*1024*1024,FILE_SCOPE='https://www.googleapis.com/auth/drive.file',ALL_SCOPE='https://www.googleapis.com/auth/drive';
 const ID=/^[A-Za-z0-9_-]{11}$/,NAME=/^slide_\d{13}_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(direct|tab)_(quick|normal)\.png$/;
 const key=(vid,name)=>vid+'/'+name;
-let dbPromise,serial=Promise.resolve();
+let dbPromise,serial=Promise.resolve(),writeSerial=Promise.resolve();
+function queueWrite(fn){const p=writeSerial.then(fn);writeSerial=p.catch(()=>{});return p;}
 function queue(fn){const p=serial.then(fn);serial=p.catch(()=>{});return p;}
 function openDB(){return dbPromise??=new Promise((resolve,reject)=>{const r=indexedDB.open('slides-originals-v1',1);r.onupgradeneeded=()=>{const db=r.result,meta=db.createObjectStore('meta',{keyPath:'key'});meta.createIndex('videoId','videoId');meta.createIndex('state','state');db.createObjectStore('bytes');};r.onerror=()=>reject(r.error);r.onsuccess=()=>resolve(r.result);});}
 async function tx(stores,mode,fn){const db=await openDB();return new Promise((resolve,reject)=>{try{const t=db.transaction(stores,mode);let result;t.oncomplete=()=>resolve(result);t.onabort=t.onerror=()=>reject(t.error||Error('local storage error'));fn(t,v=>{result=v;});}catch(e){reject(e);}});}
@@ -69,7 +70,7 @@ async function uploadOne(t,c,r){const blob=await read('bytes',r.key);if(!blob)th
  else{const boundary='dg_'+crypto.randomUUID().replace(/-/g,'');const body=new Blob(['--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:r.name,mimeType:'image/png',parents:[dir]})+'\r\n--'+boundary+'\r\nContent-Type: image/png\r\n\r\n',blob,'\r\n--'+boundary+'--\r\n']);
  uploaded=await (await fetchApi(t,UPLOAD+'?uploadType=multipart&fields=id,name,size,modifiedTime',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},body})).json();if(!uploaded.id||uploaded.name!==r.name||Number(uploaded.size)!==blob.size)throw Error('Google Drive 未完整確認上傳');}
  await saveRecord({...r,state:'cloud',driveId:uploaded.id,modified:Date.parse(uploaded.modifiedTime)||r.modified});}
-async function arm(){if(await config())await chrome.alarms.create('slides-sync',{periodInMinutes:1});}
+async function arm(){if(await config()&&!await chrome.alarms.get('slides-sync'))await chrome.alarms.create('slides-sync',{periodInMinutes:1});}
 async function flush(){const c=await config();if(!c)return state();const pending=await records('state','pending');if(!pending.length){await chrome.alarms.clear('slides-sync');return state();}
  try{const t=await auth(c);await checkRoot(t,c);for(const r of pending.slice(0,5))await uploadOne(t,c,r);await chrome.storage.local.set({lastSync:'同步批次完成 '+new Date().toLocaleString()});}catch(e){await chrome.storage.local.set({lastSync:'待同步：'+e.message});}
  if((await records('state','pending')).length)await arm();else await chrome.alarms.clear('slides-sync');return state();}
@@ -85,7 +86,7 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  case 'status':data=await state();break;
  case 'options':await chrome.runtime.openOptionsPage();data=true;break;
  case 'connect':data=await queue(()=>connect(m));await arm();void queue(flush).catch(()=>{});break;
- case 'put':data=await queue(()=>put(m));await arm();break;
+ case 'put':data=await queueWrite(()=>put(m));try{await arm();}catch(_){}break;
  case 'list':data=await queue(()=>catalog(m.videoId));break;
  case 'get':data=await queue(()=>get(m));break;
  case 'index':data=await queue(index);break;
