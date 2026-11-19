@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Slides Extractor - Digital Garden
 // @namespace    https://github.com/kevinsmemo/digitalgarden
-// @version      0.2.5
+// @version      0.2.6
 // @description  Local, automatic keyframe capture with timestamps, Obsidian Markdown and ZIP export.
 // @match        https://www.youtube.com/*
 // @match        https://m.youtube.com/*
@@ -45,15 +45,15 @@
       parent.append(el);
     }
   }
-  appendUI(shadow, [["style",{},["\n  *{box-sizing:border-box}button,input,select{font:inherit}button{cursor:pointer;color:inherit;border:1px solid #47515e;background:#303945;border-radius:6px;padding:7px 9px}button:hover:not(:disabled){background:#435269}button:disabled{opacity:.4;cursor:default}#toggle{display:inline-flex;align-items:center;justify-content:center;min-height:46px;min-width:148px;padding:11px 16px;border:2px solid #93c5fd;border-radius:12px;background:#1d4ed8;color:#fff;font-size:16px;font-weight:700;line-height:1.25;white-space:nowrap;box-shadow:0 4px 20px #0009}#toggle:hover{background:#1e40af}#toggle:focus-visible{outline:3px solid #fff;outline-offset:3px}#toggle[data-running=true]{background:#166534;border-color:#86efac}#toggle[data-running=true]:hover{background:#14532d}#panel{width:min(360px,calc(100vw - 32px));max-height:75vh;overflow:auto;background:#20262f;border:1px solid #48515e;border-radius:10px;padding:12px;box-shadow:0 5px 28px #0007;margin-bottom:7px}#panel[hidden]{display:none}.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.muted{color:#aeb9c9;font-size:12px;line-height:1.5}.grow{flex:1;min-width:0}input[type=number],select{background:#151a21;color:#e7eaf0;border:1px solid #47515e;border-radius:4px;padding:4px;width:65px}label{display:flex;align-items:center;gap:4px}#status{min-height:36px;overflow-wrap:anywhere}#title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:245px;overflow:auto}.tile{border:1px solid #47515e;border-radius:5px;overflow:hidden}.tile img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#111;cursor:pointer}.tile .row{justify-content:space-between;margin:3px;padding:0}.tile button{padding:3px 5px;font-size:11px}.primary{background:#315b79}#session{width:100%;max-width:100%}details{border-top:1px solid #424b57;padding-top:8px}summary{cursor:pointer}.right{display:flex;justify-content:flex-end}#quickStart{background:#315b79;font-weight:600}#scanProgress{width:100%;height:10px;accent-color:#60a5fa}#scanBox{border-top:1px solid #424b57;padding-top:8px}#scanStep{width:76px}#scanBox[hidden],#scanReport[hidden]{display:none}"]],"\n  ",["section",{"id":"panel","hidden":""},[["div",{"class":"row"},[["strong",{"class":"grow"},["YouTube Slides Extractor"]],["span",{"class":"muted"},["v0.2.5"]]]],["div",{"id":"title"},[]],["div",{"class":"row"},[["select",{"id":"session","aria-label":"影片工作階段"},[]]]],["div",{"class":"row"},[["button",{"id":"start","class":"primary"},["開始自動擷取"]],["button",{"id":"stop"},["停止"]],["button",{"id":"manual"},["手動擷取"]]]],["div",{"class":"row"},[["label",{},["間隔 ",["select",{"id":"interval"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2","selected":""},["2 秒"]],["option",{"value":"5"},["5 秒"]]]]]],["label",{},["靈敏度 ",["select",{"id":"sensitivity"},[["option",{"value":"0.022"},["高"]],["option",{"value":"0.045","selected":""},["中"]],["option",{"value":"0.085"},["低"]]]]]]]],["div",{"id":"scanBox"},[["div",{"class":"row"},[["button",{"id":"quickStart","class":"grow"},["快速掃描（不需播放）"]],["button",{"id":"scanPause"},["暫停"]]]],["div",{"class":"row"},[["label",{},["掃描間隔 ",["select",{"id":"scanStep"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2"},["2 秒"]],["option",{"value":"3"},["3 秒"]],["option",{"value":"5","selected":""},["5 秒"]],["option",{"value":"10"},["10 秒"]]]]]],["label",{},[["input",{"id":"autoExport","type":"checkbox","checked":""},[]],"完成自動匯出"]]]],["div",{"class":"muted"},["從影片開頭逐點跳轉；請保持分頁可見。PNG 原始解析度。"]],["div",{"id":"scanReport","hidden":""},[["progress",{"id":"scanProgress","max":"100","value":"0"},[]],["div",{"id":"scanInfo","class":"muted","aria-live":"polite"},[]]]]]],["details",{},[["summary",{},["擷取區域與模式"]],["div",{"class":"muted"},["以影片內容百分比裁切；排除講者、字幕或浮水印。變更區域前建議匯出並清空。"]],["div",{"class":"row"},[["label",{},["左 % ",["input",{"id":"left","type":"number","min":"0","max":"95","value":"0"},[]]]],["label",{},["上 % ",["input",{"id":"top","type":"number","min":"0","max":"95","value":"0"},[]]]],["label",{},["右 % ",["input",{"id":"right","type":"number","min":"5","max":"100","value":"100"},[]]]],["label",{},["下 % ",["input",{"id":"bottom","type":"number","min":"5","max":"100","value":"100"},[]]]]]],["div",{"class":"row"},[["label",{},[["input",{"id":"forceTab","type":"checkbox"},[]],"強制使用分頁擷取"]]]],["div",{"class":"muted"},["若要求分享畫面，請只選「這個分頁」（不是整個螢幕）。不錄音、不上傳。即時擷取需播放；快速掃描需可直接讀取影片。"]]]],["details",{},[["summary",{},["自動儲存／Google Drive"]],["div",{"class":"muted"},["首次請選擇 Google Drive 電腦版中的專用 YouTube Slides 資料夾（不要選整個雲端硬碟）。瀏覽器會授權 YouTube 網域存取該資料夾，不只是此腳本。"]],["div",{"class":"row"},[["button",{"id":"folderChoose"},["選擇資料夾"]],["button",{"id":"folderRefresh"},["重新讀取／補存"]]]],["div",{"id":"folderInfo","class":"muted","aria-live":"polite"},["正在檢查資料夾…"]]]],["div",{"class":"row"},[["span",{"id":"count","class":"grow"},["0 張"]],["button",{"id":"export"},["匯出 ZIP"]],["button",{"id":"clear"},["清空"]]]],["div",{"id":"status","class":"muted","role":"status","aria-live":"polite"},["開啟影片後開始。"]],["div",{"id":"list"},[]],["div",{"class":"muted"},["點開面板才載入；縮圖和去重簽名使用本機快取，原始 PNG 不變。張數快取可能尚未更新；未儲存的圖片需先匯出。最多 500 張／影片。"]]]],["div",{"class":"right"},[["button",{"id":"toggle","aria-expanded":"false"},["投影片 Slides · 0"]]]]]);
+  appendUI(shadow, [["style",{},["\n  *{box-sizing:border-box}button,input,select{font:inherit}button{cursor:pointer;color:inherit;border:1px solid #47515e;background:#303945;border-radius:6px;padding:7px 9px}button:hover:not(:disabled){background:#435269}button:disabled{opacity:.4;cursor:default}#toggle{display:inline-flex;align-items:center;justify-content:center;min-height:46px;min-width:148px;padding:11px 16px;border:2px solid #93c5fd;border-radius:12px;background:#1d4ed8;color:#fff;font-size:16px;font-weight:700;line-height:1.25;white-space:nowrap;box-shadow:0 4px 20px #0009}#toggle:hover{background:#1e40af}#toggle:focus-visible{outline:3px solid #fff;outline-offset:3px}#toggle[data-running=true]{background:#166534;border-color:#86efac}#toggle[data-running=true]:hover{background:#14532d}#panel{width:min(360px,calc(100vw - 32px));max-height:75vh;overflow:auto;background:#20262f;border:1px solid #48515e;border-radius:10px;padding:12px;box-shadow:0 5px 28px #0007;margin-bottom:7px}#panel[hidden]{display:none}.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.muted{color:#aeb9c9;font-size:12px;line-height:1.5}.grow{flex:1;min-width:0}input[type=number],select{background:#151a21;color:#e7eaf0;border:1px solid #47515e;border-radius:4px;padding:4px;width:65px}label{display:flex;align-items:center;gap:4px}#status{min-height:36px;overflow-wrap:anywhere}#title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:245px;overflow:auto}.tile{border:1px solid #47515e;border-radius:5px;overflow:hidden}.tile img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#111;cursor:pointer}.tile .row{justify-content:space-between;margin:3px;padding:0}.tile button{padding:3px 5px;font-size:11px}.primary{background:#315b79}#session{width:100%;max-width:100%}details{border-top:1px solid #424b57;padding-top:8px}summary{cursor:pointer}.right{display:flex;justify-content:flex-end}#quickStart{background:#315b79;font-weight:600}#scanProgress{width:100%;height:10px;accent-color:#60a5fa}#scanBox{border-top:1px solid #424b57;padding-top:8px}#scanStep{width:76px}#scanBox[hidden],#scanReport[hidden]{display:none}\n#viewCurrent[hidden],#viewHistory[hidden]{display:none}#viewTabs{display:flex;gap:6px;margin:8px 0 12px}#viewTabs button{flex:1}#viewTabs button[aria-pressed=true]{background:#315b79;border-color:#93c5fd;font-weight:600}#historySearch{background:#151a21;color:#e7eaf0;border:1px solid #47515e;border-radius:6px;padding:8px;width:100%;min-width:0}#historyList{max-height:48vh;overflow:auto}#historyList a{display:block;color:inherit;text-decoration:none;padding:9px 4px;border-bottom:1px solid #424b57}#historyList a:hover{background:#303945}.histline{display:flex;align-items:center;gap:8px}.histtitle{flex:1;min-width:0;overflow-wrap:anywhere;font-weight:600}.histcount{white-space:nowrap;color:#93c5fd}.histmeta{color:#aeb9c9;font-size:11px;margin-top:4px}#historyMore[hidden]{display:none}"]],"\n  ",["section",{"id":"panel","hidden":""},[["div",{"class":"row"},[["strong",{"class":"grow"},["YouTube Slides Extractor"]],["span",{"class":"muted"},["v0.2.6"]]]],["div",{"id":"viewTabs","role":"group","aria-label":"投影片檢視"},[["button",{"id":"tabCurrent","aria-pressed":"true"},["目前影片"]],["button",{"id":"tabHistory","aria-pressed":"false"},["歷史紀錄"]]]],["div",{"id":"viewCurrent"},[["div",{"id":"title"},[]],["div",{"class":"row"},[["select",{"id":"session","aria-label":"影片工作階段"},[]]]],["div",{"class":"row"},[["button",{"id":"start","class":"primary"},["開始自動擷取"]],["button",{"id":"stop"},["停止"]],["button",{"id":"manual"},["手動擷取"]]]],["div",{"class":"row"},[["label",{},["間隔 ",["select",{"id":"interval"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2","selected":""},["2 秒"]],["option",{"value":"5"},["5 秒"]]]]]],["label",{},["靈敏度 ",["select",{"id":"sensitivity"},[["option",{"value":"0.022"},["高"]],["option",{"value":"0.045","selected":""},["中"]],["option",{"value":"0.085"},["低"]]]]]]]],["div",{"id":"scanBox"},[["div",{"class":"row"},[["button",{"id":"quickStart","class":"grow"},["快速掃描（不需播放）"]],["button",{"id":"scanPause"},["暫停"]]]],["div",{"class":"row"},[["label",{},["掃描間隔 ",["select",{"id":"scanStep"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2"},["2 秒"]],["option",{"value":"3"},["3 秒"]],["option",{"value":"5","selected":""},["5 秒"]],["option",{"value":"10"},["10 秒"]]]]]],["label",{},[["input",{"id":"autoExport","type":"checkbox","checked":""},[]],"完成自動匯出"]]]],["div",{"class":"muted"},["從影片開頭逐點跳轉；請保持分頁可見。PNG 原始解析度。"]],["div",{"id":"scanReport","hidden":""},[["progress",{"id":"scanProgress","max":"100","value":"0"},[]],["div",{"id":"scanInfo","class":"muted","aria-live":"polite"},[]]]]]],["details",{},[["summary",{},["擷取區域與模式"]],["div",{"class":"muted"},["以影片內容百分比裁切；排除講者、字幕或浮水印。變更區域前建議匯出並清空。"]],["div",{"class":"row"},[["label",{},["左 % ",["input",{"id":"left","type":"number","min":"0","max":"95","value":"0"},[]]]],["label",{},["上 % ",["input",{"id":"top","type":"number","min":"0","max":"95","value":"0"},[]]]],["label",{},["右 % ",["input",{"id":"right","type":"number","min":"5","max":"100","value":"100"},[]]]],["label",{},["下 % ",["input",{"id":"bottom","type":"number","min":"5","max":"100","value":"100"},[]]]]]],["div",{"class":"row"},[["label",{},[["input",{"id":"forceTab","type":"checkbox"},[]],"強制使用分頁擷取"]]]],["div",{"class":"muted"},["若要求分享畫面，請只選「這個分頁」（不是整個螢幕）。不錄音、不上傳。即時擷取需播放；快速掃描需可直接讀取影片。"]]]],["details",{},[["summary",{},["自動儲存／Google Drive"]],["div",{"class":"muted"},["首次請選擇 Google Drive 電腦版中的專用 YouTube Slides 資料夾（不要選整個雲端硬碟）。瀏覽器會授權 YouTube 網域存取該資料夾，不只是此腳本。"]],["div",{"class":"row"},[["button",{"id":"folderChoose"},["選擇資料夾"]],["button",{"id":"folderRefresh"},["重新讀取／補存"]]]],["div",{"id":"folderInfo","class":"muted","aria-live":"polite"},["正在檢查資料夾…"]]]],["div",{"class":"row"},[["span",{"id":"count","class":"grow"},["0 張"]],["button",{"id":"export"},["匯出 ZIP"]],["button",{"id":"clear"},["清空"]]]],["div",{"id":"status","class":"muted","role":"status","aria-live":"polite"},["開啟影片後開始。"]],["div",{"id":"list"},[]],["div",{"class":"muted"},["點開面板才載入；縮圖和去重簽名使用本機快取，原始 PNG 不變。張數快取可能尚未更新；未儲存的圖片需先匯出。最多 500 張／影片。"]]]],["div",{"id":"viewHistory","hidden":""},[["input",{"id":"historySearch","type":"search","placeholder":"搜尋影片標題或 ID…","aria-label":"搜尋歷史影片"},[]],["div",{"class":"row"},[["span",{"id":"historySummary","class":"grow muted"},["尚無紀錄"]],["button",{"id":"historyRefresh"},["更新索引"]]]],["div",{"id":"historyStatus","class":"muted","role":"status","aria-live":"polite"},["本機索引；跨裝置請手動更新。"]],["div",{"id":"historyList"},[]],["button",{"id":"historyMore","hidden":""},["載入更多"]]]]]],["div",{"class":"right"},[["button",{"id":"toggle","aria-expanded":"false"},["投影片 Slides · 0"]]]]]);
   (document.body||document.documentElement).append(host);
-  console.info("[YouTube Slides Extractor] v0.2.5 ready");
+  console.info("[YouTube Slides Extractor] v0.2.6 ready");
   const $=id=>shadow.getElementById(id), status=t=>{$('status').textContent=t;};
   const video=()=>document.querySelector('#movie_player video.html5-main-video')||document.querySelector('video.html5-main-video');
   const activeId=()=>idOf(location.href);
   const titleOf=()=>document.querySelector('h1.ytd-watch-metadata yt-formatted-string')?.textContent?.trim()||document.title.replace(/\s*-\s*YouTube\s*$/,'');
   const ad=()=>!!document.querySelector('#movie_player.ad-showing,#movie_player.ad-interrupting');
-  function update(){const n=current?.frames.length||0;const scanning=!!scan;const display=displayCount(current);$('count').textContent=current?.loading?'載入中…':current&&!current.loaded&&folderHandle?`${display} 張（尚未載入）`:`${n} 張`;$('toggle').textContent=scanning?`投影片 Slides · ${scan.paused?'暫停':Math.floor(scan.index/scan.total*100)+'%'} · ${n}`:`投影片 Slides · ${running?'● ':''}${display}`;$('toggle').title=current&&!current.loaded&&folderHandle?'本機張數快取；開啟面板後確認實際檔案':'開啟投影片面板';$('toggle').dataset.running=String(running);$('start').disabled=running||starting||exporting||folderBusy>0||!current||current.id!==activeId()||(folderAccess&&!current.loaded);$('quickStart').disabled=$('start').disabled;$('scanPause').disabled=!scan;$('scanPause').textContent=scan?.paused?'繼續':'暫停';$('scanStep').disabled=running||starting||exporting;$('autoExport').disabled=running||starting||exporting;$('sensitivity').disabled=scanning;$('stop').disabled=!running&&!starting;$('manual').disabled=scanning||!running||busy||current?.id!==activeId();$('export').disabled=!n||exporting||scanning||folderBusy>0;$('clear').disabled=!n||running||starting||exporting||folderBusy>0;$('session').disabled=running||starting||exporting||folderBusy>0;$('forceTab').disabled=running||starting;for(const key of ['left','top','right','bottom'])$(key).disabled=running||starting;updateFolderUI();syncDeleteButtons();}
+  function update(){const n=current?.frames.length||0;const scanning=!!scan;const display=displayCount(current);$('count').textContent=current?.loading?'載入中…':current&&!current.loaded&&folderHandle?`${display} 張（尚未載入）`:`${n} 張`;$('toggle').textContent=scanning?`投影片 Slides · ${scan.paused?'暫停':Math.floor(scan.index/scan.total*100)+'%'} · ${n}`:`投影片 Slides · ${running?'● ':''}${display}`;$('toggle').title=current&&!current.loaded&&folderHandle?'本機張數快取；開啟面板後確認實際檔案':'開啟投影片面板';$('toggle').dataset.running=String(running);$('start').disabled=running||starting||exporting||folderBusy>0||!current||current.id!==activeId()||(folderAccess&&!current.loaded);$('quickStart').disabled=$('start').disabled;$('scanPause').disabled=!scan;$('scanPause').textContent=scan?.paused?'繼續':'暫停';$('scanStep').disabled=running||starting||exporting;$('autoExport').disabled=running||starting||exporting;$('sensitivity').disabled=scanning;$('stop').disabled=!running&&!starting;$('manual').disabled=scanning||!running||busy||current?.id!==activeId();$('export').disabled=!n||exporting||scanning||folderBusy>0;$('clear').disabled=!n||running||starting||exporting||folderBusy>0;$('session').disabled=running||starting||exporting||folderBusy>0;$('forceTab').disabled=running||starting;for(const key of ['left','top','right','bottom'])$(key).disabled=running||starting;updateFolderUI();syncDeleteButtons();syncHistoryControls();}
   // Keep DOM nodes for unchanged slides. The original PNG is never assigned
   // to the image element when a small preview is available.
   const tiles=new Map(),options=new Map();let tileSession=null,deleteLocked=null;
@@ -74,7 +74,7 @@
     const title=current?.title||'請開啟 YouTube 影片';if($('title').textContent!==title)$('title').textContent=title;
     const list=$('list');
     if(tileSession!==current){list.replaceChildren();tiles.clear();tileSession=current;}
-    if(!$('panel').hidden){
+    if(!$('panel').hidden&&!historyView){
       const frames=[...(current?.frames||[])].sort((a,b)=>a.time-b.time),wanted=new Set(frames);
       for(const [f,item] of tiles){if(!wanted.has(f)){item.el.remove();tiles.delete(f);}}
       let cursor=list.firstChild;
@@ -105,7 +105,7 @@
     $('scanReport').hidden=true;
     if(id){if(!sessions.has(id))sessions.set(id,newSession(id,titleOf()||id));current=sessions.get(id);if(!current.loaded&&!current.loading)current.loadAttempted=false;}
     else current=null;
-    releaseInactive();render();
+    setHistoryView(!id,false);releaseInactive();render();queueBadgeScan(document);
   }
   function drawTest(v){const c=document.createElement('canvas');c.width=c.height=4;const ctx=c.getContext('2d');ctx.drawImage(v,0,0,4,4);ctx.getImageData(0,0,4,4);}
   function crop(){const a=['left','top','right','bottom'].map(k=>Number($(k).value)/100);if(a.some(x=>!Number.isFinite(x)||x<0||x>1)||a[2]-a[0]<.05||a[3]-a[1]<.05)throw Error('裁切區域無效：右需大於左，下需大於上（至少 5%）。');return a;}
@@ -247,17 +247,58 @@
   // merely because a YouTube watch page was opened. Access permission is checked
   // separately. The actual filesystem remains the source of truth.
   const countPrefix='dg-slides-count-v1:';
-  function cachedCount(id){try{const raw=localStorage.getItem(countPrefix+id);if(raw===null)return null;const v=JSON.parse(raw);return Number.isSafeInteger(v.count)&&v.count>=0?v.count:null;}catch(_){return null;}}
+  const historyIndex=new Map();
+  let historyDirty=true,historyLimit=50,historyView=false,historyUpdating=false;
+  function validIndexId(id){return /^[A-Za-z0-9_-]{11}$/.test(id||'');}
+  function cleanTitle(title,id){
+    const t=typeof title==='string'?title.replace(/\s*-\s*YouTube\s*$/i,'').trim().slice(0,350):'';
+    return t&&t!==id&&t.toLowerCase()!=='youtube'?t:'';
+  }
+  function decodeRecord(raw){
+    try{
+      const v=JSON.parse(raw);
+      if(!Number.isSafeInteger(v?.count)||v.count<0)return null;
+      return {count:v.count,updatedAt:Number.isFinite(v.updatedAt)?v.updatedAt:0,title:typeof v.title==='string'?v.title.slice(0,350):''};
+    }catch(_){return null;}
+  }
+  function readHistoryIndex(){
+    try{
+      for(let i=0;i<localStorage.length;i++){
+        const k=localStorage.key(i);if(!k?.startsWith(countPrefix))continue;
+        const id=k.slice(countPrefix.length);if(!validIndexId(id))continue;
+        const r=decodeRecord(localStorage.getItem(k));if(r)historyIndex.set(id,r);
+      }
+    }catch(_){}
+  }
+  function cachedCount(id){return historyIndex.get(id)?.count??null;}
+  function storeRecord(id,count,title,changedAt){
+    if(!validIndexId(id)||!Number.isSafeInteger(count)||count<0)return;
+    const prior=historyIndex.get(id),next={count,title:cleanTitle(title,id)||prior?.title||'',updatedAt:changedAt??(prior?.count===count?prior.updatedAt:Date.now())};
+    if(prior&&prior.count===next.count&&prior.title===next.title&&prior.updatedAt===next.updatedAt)return;
+    historyIndex.set(id,next);
+    try{localStorage.setItem(countPrefix+id,JSON.stringify(next));}catch(_){}
+    onIndexChange();
+  }
   function cacheCount(s){
     if(!s.diskNames)return;
     s.diskCount=s.diskNames.size;
-    try{localStorage.setItem(countPrefix+s.id,JSON.stringify({count:s.diskCount,updatedAt:Date.now()}));}catch(_){}
+    storeRecord(s.id,s.diskCount,s.title);
   }
   function resetCountCache(){
     try{for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);if(k?.startsWith(countPrefix))localStorage.removeItem(k);}}catch(_){}
+    historyIndex.clear();onIndexChange();
     for(const s of sessions.values()){s.diskCount=null;s.diskNames=null;s.loaded=false;s.loadAttempted=false;}
   }
-  function newSession(id,title){return {id,title,frames:[],diskCount:cachedCount(id),diskNames:null,loaded:false,loading:false,loadAttempted:false};}
+  function rememberCurrentTitle(){
+    if(!current||current.id!==activeId())return;
+    const t=cleanTitle(titleOf(),current.id);
+    if(!t)return;
+    // Do not overwrite a useful recorded title with a generic initial SPA title.
+    current.title=t;
+    const r=historyIndex.get(current.id);
+    if(r&&r.title!==t)storeRecord(current.id,r.count,t,r.updatedAt);
+  }
+  function newSession(id,title){return {id,title:historyIndex.get(id)?.title||title,frames:[],diskCount:cachedCount(id),diskNames:null,loaded:false,loading:false,loadAttempted:false};}
   function displayCount(s){
     if(!s)return 0;
     const n=s.frames.length;
@@ -278,7 +319,7 @@
     }
   }
   function maybeLoadCurrent(){
-    if($('panel').hidden||!folderHandle||!folderAccess||!current||current.loaded||current.loading||current.loadAttempted||folderBusy||running||starting||exporting)return;
+    if($('panel').hidden||historyView||!folderHandle||!folderAccess||!current||current.loaded||current.loading||current.loadAttempted||folderBusy||running||starting||exporting)return;
     void refreshFolder(current);
   }
 
@@ -512,7 +553,7 @@
       folderAccess=true;
       let settingNote='';
       try{await handleSetting(true,h);}catch(e){settingNote='；無法記住資料夾，下次需重新選擇';}
-      if(current&&!$('panel').hidden){const target=current;await enqueueFolder(()=>loadSession(h,target));}
+      if(current&&!$('panel').hidden&&!historyView){const target=current;await enqueueFolder(()=>loadSession(h,target));}
       else folderNote='資料夾已選擇';
       folderNote+=settingNote;
     }catch(e){if(e.name!=='AbortError')folderNote='資料夾設定失敗：'+errorText(e);}
@@ -526,7 +567,7 @@
       const granted=await h.requestPermission(permission);
       folderAccess=granted==='granted';
       if(!folderAccess){folderNote='未授權，請使用 ZIP 匯出保留圖片。';return;}
-      if(current===s&&!$('panel').hidden)await enqueueFolder(()=>loadSession(h,s));
+      if(current===s&&!$('panel').hidden&&!historyView)await enqueueFolder(()=>loadSession(h,s));
     }catch(e){folderNote='補存失敗：'+errorText(e);}
     finally{folderBusy--;releaseInactive();update();maybeLoadCurrent();}
   }
@@ -582,9 +623,201 @@
     }catch(e){folderNote='無法讀取資料夾設定：'+errorText(e);}
     finally{folderBusy--;releaseInactive();update();maybeLoadCurrent();}
   }
+
+  function syncHistoryControls(){
+    $('historyRefresh').disabled=historyUpdating||running||starting||exporting||folderBusy>0||folderPending>0;
+    $('tabHistory').disabled=running||starting||exporting;
+  }
+  function setHistoryView(show,interact=true){
+    if(interact&&show&&(running||starting||exporting))return;
+    historyView=!!show;
+    $('viewCurrent').hidden=historyView;$('viewHistory').hidden=!historyView;
+    $('tabCurrent').setAttribute('aria-pressed',String(!historyView));$('tabHistory').setAttribute('aria-pressed',String(historyView));
+    if(!interact)return;
+    if(historyView){historyLimit=50;renderHistory();}
+    else{rememberCurrentTitle();if(current&&!current.loaded&&!current.loading)current.loadAttempted=false;render();maybeLoadCurrent();}
+  }
+  function historyRows(){
+    const q=$('historySearch').value.trim().toLowerCase();
+    return [...historyIndex.entries()].filter(([id,r])=>r.count>0&&(!q||(id+' '+r.title).toLowerCase().includes(q))).sort((a,b)=>b[1].updatedAt-a[1].updatedAt||a[0].localeCompare(b[0]));
+  }
+  function renderHistory(force=false){
+    if(!historyView||$('panel').hidden)return;
+    if(!historyDirty&&!force)return;
+    historyDirty=false;
+    const rows=historyRows(),all=[...historyIndex.values()].filter(r=>r.count>0);
+    $('historySummary').textContent=all.length+' 部影片 · '+all.reduce((n,r)=>n+r.count,0)+' 張';
+    const list=$('historyList'),frag=document.createDocumentFragment();
+    const formatter=new Intl.DateTimeFormat('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
+    for(const [id,r] of rows.slice(0,historyLimit)){
+      const a=document.createElement('a');a.href='/watch?v='+encodeURIComponent(id);
+      a.title=r.title||id;
+      const line=document.createElement('div');line.className='histline';
+      const name=document.createElement('span');name.className='histtitle';name.textContent=r.title||id;
+      const count=document.createElement('span');count.className='histcount';count.textContent=r.count+' 張';
+      line.append(name,count);
+      const meta=document.createElement('div');meta.className='histmeta';
+      meta.textContent=r.updatedAt>0?'索引更新：'+formatter.format(new Date(r.updatedAt)):id;
+      a.append(line,meta);frag.append(a);
+    }
+    if(!rows.length){const empty=document.createElement('p');empty.className='muted';empty.textContent=all.length?'沒有符合搜尋條件的影片。':'尚無已索引的影片。可點「更新索引」或開啟已擷取影片。';frag.append(empty);}
+    list.replaceChildren(frag);$('historyMore').hidden=rows.length<=historyLimit;
+  }
+  function onIndexChange(){
+    historyDirty=true;queueBadgeScan(document);
+    if(historyView&&!$('panel').hidden&&!historyUpdating)renderHistory();
+  }
+  // Explicitly requested index refresh enumerates only filenames, never getFile,
+  // createImageBitmap, thumbnails, video streams, or ZIP contents.
+  async function collectIndex(h,report=()=>{}){
+    if(!await canAccess(h))throw Error('資料夾權限不可用');
+    const dirs=new Map();
+    async function scanRoot(root){
+      for await(const [id,entry] of root.entries()){
+        if(entry.kind!=='directory'||!validIndexId(id))continue;
+        const found=dirs.get(id)||[];found.push(entry);dirs.set(id,found);
+      }
+    }
+    await scanRoot(h);
+    try{await scanRoot(await h.getDirectoryHandle('slides-v1',{create:false}));}catch(e){if(e.name!=='NotFoundError')throw e;}
+    const result=new Map();let i=0;
+    for(const [id,handles] of dirs){
+      const names=new Set();
+      for(const dir of handles)for await(const [name,entry] of dir.entries()){if(entry.kind==='file'&&diskMeta(name))names.add(name);}
+      result.set(id,names);report(++i,dirs.size);
+    }
+    return result;
+  }
+  function applyCollectedIndex(found){
+    const ids=new Set([...historyIndex.keys(),...found.keys(),...sessions.keys()]);
+    for(const id of ids){
+      const names=found.get(id)||new Set(),session=sessions.get(id),record=historyIndex.get(id);
+      if(session){
+        if(session.loaded&&(!session.diskNames||session.diskNames.size!==names.size||[...names].some(n=>!session.diskNames.has(n)))){session.loaded=false;session.loadAttempted=false;}
+        session.diskCount=names.size;
+      }
+      storeRecord(id,names.size,session?.title||record?.title||'');
+    }
+  }
+  async function refreshHistory(){
+    if(historyUpdating||running||starting||exporting||folderBusy||folderPending)return;
+    if(!folderHandle){$('historyStatus').textContent='請先到「目前影片」設定 Google Drive 專用資料夾。';return;}
+    historyUpdating=true;folderBusy++;update();
+    const h=folderHandle;
+    try{
+      // Call permission promptly from a real click; never ask on page load.
+      const granted=await h.requestPermission(permission);
+      folderAccess=granted==='granted';
+      if(!folderAccess)throw Error('未取得資料夾讀取權限');
+      $('historyStatus').textContent='正在掃描影片資料夾及 PNG 檔名（不讀圖片）…';
+      const found=await enqueueFolder(()=>collectIndex(h,(i,n)=>{$('historyStatus').textContent='索引中：'+i+'/'+n+' 部影片';}));
+      if(folderHandle!==h)throw Error('資料夾已變更，請重新更新索引');
+      applyCollectedIndex(found);
+      $('historyStatus').textContent='索引已更新；尚未同步至本機的雲端檔案不會列入。';
+    }catch(e){$('historyStatus').textContent='更新失敗：'+errorText(e)+'；既有快取已保留。';}
+    finally{historyUpdating=false;folderBusy--;historyDirty=true;renderHistory();releaseInactive();update();maybeLoadCurrent();}
+  }
+  // Thumbnail badges: batched incremental observation of YouTube thumbnail
+  // anchors, with no image fetches and no mutation of YouTube links.
+  const badgeClass='dg-slide-count-badge',badgeSelector='a#thumbnail[href],a.yt-lockup-view-model__content-image[href],a.yt-lockup-view-model-wiz__content-image[href],a.yt-lockup-view-model__content-image,a.yt-lockup-view-model-wiz__content-image,a[href] > yt-thumbnail-view-model';
+  let badgeObserver=null,badgeTimer=null,badgeRoots=new Set(),badgeRecords=new Map();
+  function linkVideoId(anchor){
+    try{
+      const u=new URL(anchor.getAttribute('href')||'',location.origin);
+      if(u.origin!==location.origin||!(u.pathname==='/watch'||/^\/(?:live|shorts)\//.test(u.pathname)))return null;
+      const id=u.pathname==='/watch'?u.searchParams.get('v'):u.pathname.split('/')[2];
+      return validIndexId(id)?id:null;
+    }catch(_){return null;}
+  }
+  function badgeTarget(el){return el?.tagName==='A'?el:el?.closest?.('a[href]');}
+  function removeBadge(anchor){
+    const old=badgeRecords.get(anchor);if(!old)return;
+    old.badge.remove();
+    if(old.positionChanged&&anchor.style.position==='relative')anchor.style.position=old.previousPosition;
+    badgeRecords.delete(anchor);
+  }
+  function cardTitle(anchor,id){
+    const card=anchor.closest('ytd-rich-item-renderer,ytd-video-renderer,ytd-grid-video-renderer,ytd-compact-video-renderer,ytd-playlist-video-renderer,ytd-reel-item-renderer,yt-lockup-view-model');
+    if(!card)return '';
+    const candidates=card.querySelectorAll('a#video-title,a#video-title-link,a.yt-lockup-metadata-view-model__title,a.yt-lockup-metadata-view-model-wiz__title');
+    for(const a of candidates){if(linkVideoId(a)!==id)continue;const t=cleanTitle(a.getAttribute('title')||a.textContent,id);if(t)return t;}
+    return '';
+  }
+  function paintBadge(anchor){
+    if(!anchor?.isConnected){if(anchor)removeBadge(anchor);return;}
+    const id=linkVideoId(anchor),r=id?historyIndex.get(id):null;
+    if(!r||r.count<=0){removeBadge(anchor);return;}
+    let item=badgeRecords.get(anchor);
+    if(!item){
+      const badge=document.createElement('span');badge.className=badgeClass;
+      // The overlay lives inside the existing thumbnail anchor and is inert.
+      const changed=getComputedStyle(anchor).position==='static',previousPosition=anchor.style.position;
+      if(changed)anchor.style.position='relative';
+      anchor.append(badge);item={badge,positionChanged:changed,previousPosition};badgeRecords.set(anchor,item);
+    }
+    if(item.badge.parentNode!==anchor)anchor.append(item.badge);
+    const label=r.count+' 張投影片';if(item.badge.textContent!==label)item.badge.textContent=label;
+    item.badge.title='已記錄 '+r.count+' 張投影片（本機索引）';
+    if(!r.title){const title=cardTitle(anchor,id);if(title)storeRecord(id,r.count,title,r.updatedAt);}
+  }
+  function flushBadges(){
+    badgeTimer=null;const roots=[...badgeRoots];badgeRoots.clear();
+    // Remove records whose cards were recycled or detached; avoid retaining DOM.
+    for(const [anchor] of badgeRecords)if(!anchor.isConnected)removeBadge(anchor);
+    const hasRecords=[...historyIndex.values()].some(r=>r.count>0);
+    if(!hasRecords){for(const [anchor] of badgeRecords)removeBadge(anchor);return;}
+    const anchors=new Set();
+    for(const root of roots){
+      if(!root?.isConnected&&root!==document)continue;
+      if(root.nodeType===1){if(root.matches(badgeSelector))anchors.add(badgeTarget(root));const near=root.closest('a[href]');if(near&&(near.matches(badgeSelector)||badgeRecords.has(near)))anchors.add(near);}
+      for(const el of root.querySelectorAll?.(badgeSelector)||[])anchors.add(badgeTarget(el));
+    }
+    if(roots.includes(document))for(const [anchor] of badgeRecords)anchors.add(anchor);
+    for(const anchor of anchors)paintBadge(anchor);
+  }
+  function queueBadgeScan(root){
+    const hasRecords=[...historyIndex.values()].some(r=>r.count>0);
+    if(!hasRecords&&!badgeRecords.size)return;
+    if(root===document||badgeRoots.size>=80){badgeRoots.clear();badgeRoots.add(document);}
+    else if(!badgeRoots.has(document))badgeRoots.add(root);
+    if(badgeTimer===null)badgeTimer=setTimeout(flushBadges,160);
+  }
+  function installBadgeLayer(){
+    const css=document.createElement('style');
+    css.textContent='.'+badgeClass+'{position:absolute;left:5px;bottom:5px;z-index:3;padding:3px 7px;border-radius:5px;background:rgba(29,78,216,.94);color:white;font:600 11px/1.4 system-ui;pointer-events:none;white-space:nowrap;max-width:calc(100% - 10px);overflow:hidden;text-overflow:ellipsis;box-sizing:border-box}';
+    (document.head||document.documentElement).append(css);
+    if(typeof MutationObserver==='function'){
+      badgeObserver=new MutationObserver(records=>{
+        // No work for unindexed users. Ignore our own overlay mutations.
+        if(!badgeRecords.size&&![...historyIndex.values()].some(r=>r.count>0))return;
+        for(const m of records){
+          if(m.type==='attributes'){if(m.target.matches?.('a[href]')||badgeRecords.has(m.target))queueBadgeScan(m.target);continue;}
+          for(const node of m.addedNodes){if(node.nodeType===1&&!node.classList?.contains(badgeClass)&&node.id!=='dg-slides-host')queueBadgeScan(node);}
+          if([...m.removedNodes].some(n=>n.nodeType===1&&!n.classList?.contains(badgeClass)))queueBadgeScan(m.target);
+        }
+      });
+      badgeObserver.observe(document.body||document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['href']});
+    }
+    window.addEventListener('storage',e=>{
+      if(e.key===null){historyIndex.clear();readHistoryIndex();onIndexChange();return;}
+      if(!e.key.startsWith(countPrefix))return;
+      const id=e.key.slice(countPrefix.length);if(!validIndexId(id))return;
+      const r=decodeRecord(e.newValue);
+      if(r)historyIndex.set(id,r);else historyIndex.delete(id);
+      const session=sessions.get(id);if(session&&!session.loaded)session.diskCount=r?.count??null;
+      onIndexChange();update();
+    });
+    queueBadgeScan(document);
+  }
+  $('tabCurrent').onclick=()=>setHistoryView(false);
+  $('tabHistory').onclick=()=>setHistoryView(true);
+  $('historySearch').oninput=()=>{historyLimit=50;historyDirty=true;renderHistory();};
+  $('historyMore').onclick=()=>{historyLimit+=50;renderHistory(true);};
+  $('historyRefresh').onclick=refreshHistory;
+
   $('folderChoose').onclick=chooseFolder;$('folderRefresh').onclick=requestFolder;
 
-  $('toggle').onclick=()=>{$('panel').hidden=!$('panel').hidden;$('toggle').setAttribute('aria-expanded',String(!$('panel').hidden));if(!$('panel').hidden){if(current&&!current.loaded&&!current.loading)current.loadAttempted=false;render();maybeLoadCurrent();}};$('start').onclick=start;$('quickStart').onclick=startScan;$('scanPause').onclick=toggleScanPause;$('stop').onclick=()=>{if(scan)scanReport(scan,'手動停止');stop(undefined,true);};$('manual').onclick=()=>sample(true);$('session').onchange=()=>{if(running||starting)return;current=sessions.get($('session').value)||null;if(current&&!current.loaded&&!current.loading)current.loadAttempted=false;releaseInactive();render();maybeLoadCurrent();};$('clear').onclick=()=>{if(!current||running||starting||exporting||folderBusy)return;void deleteSlides(current,[...current.frames]);};$('export').onclick=async()=>{if(!current?.frames.length||exporting||scan||folderBusy)return;exporting=true;update();try{const s=current,files=makeFiles(s);const blob=await zip(files);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=exportName(s);a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);status(`已提出下載：${files.length-2} 張投影片。`);}catch(e){status(`匯出失敗：${e.message}`);}finally{exporting=false;releaseInactive();update();maybeLoadCurrent();}};
+  $('toggle').onclick=()=>{route();$('panel').hidden=!$('panel').hidden;$('toggle').setAttribute('aria-expanded',String(!$('panel').hidden));if(!$('panel').hidden){if(historyView){renderHistory();}else{rememberCurrentTitle();if(current&&!current.loaded&&!current.loading)current.loadAttempted=false;render();maybeLoadCurrent();}}};$('start').onclick=start;$('quickStart').onclick=startScan;$('scanPause').onclick=toggleScanPause;$('stop').onclick=()=>{if(scan)scanReport(scan,'手動停止');stop(undefined,true);};$('manual').onclick=()=>sample(true);$('session').onchange=()=>{if(running||starting)return;current=sessions.get($('session').value)||null;if(current&&!current.loaded&&!current.loading)current.loadAttempted=false;releaseInactive();render();maybeLoadCurrent();};$('clear').onclick=()=>{if(!current||running||starting||exporting||folderBusy)return;void deleteSlides(current,[...current.frames]);};$('export').onclick=async()=>{if(!current?.frames.length||exporting||scan||folderBusy)return;exporting=true;update();try{const s=current,files=makeFiles(s);const blob=await zip(files);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=exportName(s);a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);status(`已提出下載：${files.length-2} 張投影片。`);}catch(e){status(`匯出失敗：${e.message}`);}finally{exporting=false;releaseInactive();update();maybeLoadCurrent();}};
   window.addEventListener('yt-navigate-finish',route);document.addEventListener('fullscreenchange',()=>{previous=null;});window.addEventListener('pagehide',()=>stop());window.addEventListener('beforeunload',e=>{if(folderPending||[...sessions.values()].some(s=>s.frames.some(f=>!f.saved))){e.preventDefault();e.returnValue='';}});// YouTube navigation events handle normal routes; a lightweight 3-second
   // fallback repairs the host or missed navigation, without capture polling.
   function repairRoute(){if(!host.isConnected)(document.body||document.documentElement).append(host);route();}
@@ -596,5 +829,5 @@
       const now=performance.now();if(now-lastTick>=Number($('interval').value)*1000){lastTick=now;void sample();}
     },250);
   }
-  setInterval(repairRoute,3000);route();update();void initFolder();
+  readHistoryIndex();installBadgeLayer();setInterval(repairRoute,3000);route();update();void initFolder();
 })();
