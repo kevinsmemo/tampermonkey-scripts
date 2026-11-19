@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         YouTube Slides Extractor - Digital Garden (Beta)
 // @namespace    https://github.com/kevinsmemo/digitalgarden
-// @version      0.3.0-beta.3
+// @version      0.3.0-beta.4
 // @description  Local, automatic keyframe capture with timestamps, Obsidian Markdown and ZIP export.
 // @match        https://www.youtube.com/*
 // @match        https://m.youtube.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      googlevideo.com
+// @sandbox      JavaScript
+// @require      https://github.com/Vanilagy/mediabunny/releases/download/v1.66.0/mediabunny.min.cjs#sha256=515308bfb924787acc9247f3f9da759ec78cce93b67a5037ed08f9ae46849ea1
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/kevinsmemo/tampermonkey-scripts/main/youtube-slides-extractor-beta.user.js
 // @downloadURL  https://raw.githubusercontent.com/kevinsmemo/tampermonkey-scripts/main/youtube-slides-extractor-beta.user.js
@@ -47,9 +49,9 @@
       parent.append(el);
     }
   }
-  appendUI(shadow, [["style",{},["\n  *{box-sizing:border-box}button,input,select{font:inherit}button{cursor:pointer;color:inherit;border:1px solid #47515e;background:#303945;border-radius:6px;padding:7px 9px}button:hover:not(:disabled){background:#435269}button:disabled{opacity:.4;cursor:default}#toggle{display:inline-flex;align-items:center;justify-content:center;min-height:46px;min-width:148px;padding:11px 16px;border:2px solid #93c5fd;border-radius:12px;background:#1d4ed8;color:#fff;font-size:16px;font-weight:700;line-height:1.25;white-space:nowrap;box-shadow:0 4px 20px #0009}#toggle:hover{background:#1e40af}#toggle:focus-visible{outline:3px solid #fff;outline-offset:3px}#toggle[data-running=true]{background:#166534;border-color:#86efac}#toggle[data-running=true]:hover{background:#14532d}#panel{width:min(360px,calc(100vw - 32px));max-height:75vh;overflow:auto;background:#20262f;border:1px solid #48515e;border-radius:10px;padding:12px;box-shadow:0 5px 28px #0007;margin-bottom:7px}#panel[hidden]{display:none}.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.muted{color:#aeb9c9;font-size:12px;line-height:1.5}.grow{flex:1;min-width:0}input[type=number],select{background:#151a21;color:#e7eaf0;border:1px solid #47515e;border-radius:4px;padding:4px;width:65px}label{display:flex;align-items:center;gap:4px}#status{min-height:36px;overflow-wrap:anywhere}#title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:245px;overflow:auto}.tile{border:1px solid #47515e;border-radius:5px;overflow:hidden}.tile img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#111;cursor:pointer}.tile .row{justify-content:space-between;margin:3px;padding:0}.tile button{padding:3px 5px;font-size:11px}.primary{background:#315b79}#session{width:100%;max-width:100%}details{border-top:1px solid #424b57;padding-top:8px}summary{cursor:pointer}.right{display:flex;justify-content:flex-end}#quickStart{background:#315b79;font-weight:600}#streamStart{background:#1d4ed8;font-weight:700;width:100%;min-height:40px}#streamStart:disabled{opacity:.45}#scanProgress{width:100%;height:10px;accent-color:#60a5fa}#scanBox{border-top:1px solid #424b57;padding-top:8px}#scanStep{width:76px}#scanBox[hidden],#scanReport[hidden]{display:none}"]],"\n  ",["section",{"id":"panel","hidden":""},[["div",{"class":"row"},[["strong",{"class":"grow"},["YouTube Slides Extractor"]],["span",{"class":"muted"},["v0.3.0-beta.3"]]]],["div",{"id":"title"},[]],["div",{"class":"row"},[["select",{"id":"session","aria-label":"影片工作階段"},[]]]],["div",{"class":"row"},[["button",{"id":"start","class":"primary"},["開始自動擷取"]],["button",{"id":"stop"},["停止"]],["button",{"id":"manual"},["手動擷取"]]]],["div",{"class":"row"},[["label",{},["間隔 ",["select",{"id":"interval"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2","selected":""},["2 秒"]],["option",{"value":"5"},["5 秒"]]]]]],["label",{},["靈敏度 ",["select",{"id":"sensitivity"},[["option",{"value":"0.022"},["高"]],["option",{"value":"0.045","selected":""},["中"]],["option",{"value":"0.085"},["低"]]]]]]]],["div",{"id":"scanBox"},[["div",{"class":"row"},[["button",{"id":"streamStart"},["背景串流掃描（Beta）"]],["div",{"class":"muted"},["不操控播放器。僅在目前影片已提供可直接讀取的串流時可用；失敗時可手動改用快速掃描。"]]]],["div",{"class":"row"},[["button",{"id":"quickStart","class":"grow"},["快速掃描（不需播放）"]],["button",{"id":"scanPause"},["暫停"]]]],["div",{"class":"row"},[["label",{},["掃描間隔 ",["select",{"id":"scanStep"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2"},["2 秒"]],["option",{"value":"3"},["3 秒"]],["option",{"value":"5","selected":""},["5 秒"]],["option",{"value":"10"},["10 秒"]]]]]],["label",{},[["input",{"id":"autoExport","type":"checkbox","checked":""},[]],"完成自動匯出"]]]],["div",{"class":"muted"},["從影片開頭逐點跳轉；請保持分頁可見。PNG 原始解析度。"]],["div",{"id":"scanReport","hidden":""},[["progress",{"id":"scanProgress","max":"100","value":"0"},[]],["div",{"id":"scanInfo","class":"muted","aria-live":"polite"},[]]]]]],["details",{},[["summary",{},["擷取區域與模式"]],["div",{"class":"muted"},["以影片內容百分比裁切；排除講者、字幕或浮水印。變更區域前建議匯出並清空。"]],["div",{"class":"row"},[["label",{},["左 % ",["input",{"id":"left","type":"number","min":"0","max":"95","value":"0"},[]]]],["label",{},["上 % ",["input",{"id":"top","type":"number","min":"0","max":"95","value":"0"},[]]]],["label",{},["右 % ",["input",{"id":"right","type":"number","min":"5","max":"100","value":"100"},[]]]],["label",{},["下 % ",["input",{"id":"bottom","type":"number","min":"5","max":"100","value":"100"},[]]]]]],["div",{"class":"row"},[["label",{},[["input",{"id":"forceTab","type":"checkbox"},[]],"強制使用分頁擷取"]]]],["div",{"class":"muted"},["若要求分享畫面，請只選「這個分頁」（不是整個螢幕）。不錄音、不上傳。即時擷取需播放；快速掃描需可直接讀取影片。"]]]],["div",{"class":"row"},[["span",{"id":"count","class":"grow"},["0 張"]],["button",{"id":"export"},["匯出 ZIP"]],["button",{"id":"clear"},["清空"]]]],["div",{"id":"status","class":"muted","role":"status","aria-live":"polite"},["開啟影片後開始。"]],["div",{"id":"list"},[]],["div",{"class":"muted"},["暫存在本分頁記憶體，重新整理或關閉前請匯出。最多 500 張／影片。"]]]],["div",{"class":"right"},[["button",{"id":"toggle","aria-expanded":"false"},["投影片 Slides · 0"]]]]]);
+  appendUI(shadow, [["style",{},["\n  *{box-sizing:border-box}button,input,select{font:inherit}button{cursor:pointer;color:inherit;border:1px solid #47515e;background:#303945;border-radius:6px;padding:7px 9px}button:hover:not(:disabled){background:#435269}button:disabled{opacity:.4;cursor:default}#toggle{display:inline-flex;align-items:center;justify-content:center;min-height:46px;min-width:148px;padding:11px 16px;border:2px solid #93c5fd;border-radius:12px;background:#1d4ed8;color:#fff;font-size:16px;font-weight:700;line-height:1.25;white-space:nowrap;box-shadow:0 4px 20px #0009}#toggle:hover{background:#1e40af}#toggle:focus-visible{outline:3px solid #fff;outline-offset:3px}#toggle[data-running=true]{background:#166534;border-color:#86efac}#toggle[data-running=true]:hover{background:#14532d}#panel{width:min(360px,calc(100vw - 32px));max-height:75vh;overflow:auto;background:#20262f;border:1px solid #48515e;border-radius:10px;padding:12px;box-shadow:0 5px 28px #0007;margin-bottom:7px}#panel[hidden]{display:none}.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.muted{color:#aeb9c9;font-size:12px;line-height:1.5}.grow{flex:1;min-width:0}input[type=number],select{background:#151a21;color:#e7eaf0;border:1px solid #47515e;border-radius:4px;padding:4px;width:65px}label{display:flex;align-items:center;gap:4px}#status{min-height:36px;overflow-wrap:anywhere}#title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:245px;overflow:auto}.tile{border:1px solid #47515e;border-radius:5px;overflow:hidden}.tile img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#111;cursor:pointer}.tile .row{justify-content:space-between;margin:3px;padding:0}.tile button{padding:3px 5px;font-size:11px}.primary{background:#315b79}#session{width:100%;max-width:100%}details{border-top:1px solid #424b57;padding-top:8px}summary{cursor:pointer}.right{display:flex;justify-content:flex-end}#quickStart{background:#315b79;font-weight:600}#streamStart{background:#1d4ed8;font-weight:700;width:100%;min-height:40px}#streamStart:disabled{opacity:.45}#scanProgress{width:100%;height:10px;accent-color:#60a5fa}#scanBox{border-top:1px solid #424b57;padding-top:8px}#scanStep{width:76px}#scanBox[hidden],#scanReport[hidden]{display:none}"]],"\n  ",["section",{"id":"panel","hidden":""},[["div",{"class":"row"},[["strong",{"class":"grow"},["YouTube Slides Extractor"]],["span",{"class":"muted"},["v0.3.0-beta.4"]]]],["div",{"id":"title"},[]],["div",{"class":"row"},[["select",{"id":"session","aria-label":"影片工作階段"},[]]]],["div",{"class":"row"},[["button",{"id":"start","class":"primary"},["開始自動擷取"]],["button",{"id":"stop"},["停止"]],["button",{"id":"manual"},["手動擷取"]]]],["div",{"class":"row"},[["label",{},["間隔 ",["select",{"id":"interval"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2","selected":""},["2 秒"]],["option",{"value":"5"},["5 秒"]]]]]],["label",{},["靈敏度 ",["select",{"id":"sensitivity"},[["option",{"value":"0.022"},["高"]],["option",{"value":"0.045","selected":""},["中"]],["option",{"value":"0.085"},["低"]]]]]]]],["div",{"id":"scanBox"},[["div",{"class":"row"},[["button",{"id":"streamStart"},["背景串流掃描（Beta）"]],["div",{"class":"muted"},["不操控播放器。僅在目前影片已提供可直接讀取的串流時可用；失敗時可手動改用快速掃描。"]]]],["div",{"class":"row"},[["button",{"id":"quickStart","class":"grow"},["快速掃描（不需播放）"]],["button",{"id":"scanPause"},["暫停"]]]],["div",{"class":"row"},[["label",{},["掃描間隔 ",["select",{"id":"scanStep"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2"},["2 秒"]],["option",{"value":"3"},["3 秒"]],["option",{"value":"5","selected":""},["5 秒"]],["option",{"value":"10"},["10 秒"]]]]]],["label",{},[["input",{"id":"autoExport","type":"checkbox","checked":""},[]],"完成自動匯出"]]]],["div",{"class":"muted"},["從影片開頭逐點跳轉；請保持分頁可見。PNG 原始解析度。"]],["div",{"id":"scanReport","hidden":""},[["progress",{"id":"scanProgress","max":"100","value":"0"},[]],["div",{"id":"scanInfo","class":"muted","aria-live":"polite"},[]]]]]],["details",{},[["summary",{},["擷取區域與模式"]],["div",{"class":"muted"},["以影片內容百分比裁切；排除講者、字幕或浮水印。變更區域前建議匯出並清空。"]],["div",{"class":"row"},[["label",{},["左 % ",["input",{"id":"left","type":"number","min":"0","max":"95","value":"0"},[]]]],["label",{},["上 % ",["input",{"id":"top","type":"number","min":"0","max":"95","value":"0"},[]]]],["label",{},["右 % ",["input",{"id":"right","type":"number","min":"5","max":"100","value":"100"},[]]]],["label",{},["下 % ",["input",{"id":"bottom","type":"number","min":"5","max":"100","value":"100"},[]]]]]],["div",{"class":"row"},[["label",{},[["input",{"id":"forceTab","type":"checkbox"},[]],"強制使用分頁擷取"]]]],["div",{"class":"muted"},["若要求分享畫面，請只選「這個分頁」（不是整個螢幕）。不錄音、不上傳。即時擷取需播放；快速掃描需可直接讀取影片。"]]]],["div",{"class":"row"},[["span",{"id":"count","class":"grow"},["0 張"]],["button",{"id":"export"},["匯出 ZIP"]],["button",{"id":"clear"},["清空"]]]],["div",{"id":"status","class":"muted","role":"status","aria-live":"polite"},["開啟影片後開始。"]],["div",{"id":"list"},[]],["div",{"class":"muted"},["暫存在本分頁記憶體，重新整理或關閉前請匯出。最多 500 張／影片。"]]]],["div",{"class":"right"},[["button",{"id":"toggle","aria-expanded":"false"},["投影片 Slides · 0"]]]]]);
   (document.body||document.documentElement).append(host);
-  console.info("[YouTube Slides Extractor] v0.3.0-beta.3 ready");
+  console.info("[YouTube Slides Extractor] v0.3.0-beta.4 ready");
   const $=id=>shadow.getElementById(id), status=t=>{$('status').textContent=t;};
   const video=()=>document.querySelector('#movie_player video.html5-main-video')||document.querySelector('video.html5-main-video');
   const activeId=()=>idOf(location.href);
@@ -224,20 +226,24 @@
     });
   }
   let decoderLibrary=null;
+  function resolveDecoderLibrary(){
+    const candidates=[];
+    try{if(typeof Mediabunny!=='undefined')candidates.push(Mediabunny);}catch(_){}
+    try{if(typeof globalThis!=='undefined')candidates.push(globalThis.Mediabunny);}catch(_){}
+    try{if(typeof module!=='undefined')candidates.push(module.exports);}catch(_){}
+    try{if(typeof exports!=='undefined')candidates.push(exports);}catch(_){}
+    for(const value of candidates){
+      if(value?.CustomSource&&value?.CanvasSink&&value?.Input&&value?.MP4&&value?.WEBM)return value;
+    }
+    return null;
+  }
   async function loadMediaLibrary(){
     if(decoderLibrary)return decoderLibrary;
-    let timeout;
-    try{
-      const lib=await Promise.race([
-        import('https://cdn.jsdelivr.net/npm/mediabunny@1.66.0/dist/bundles/mediabunny.min.mjs'),
-        new Promise((_,reject)=>{timeout=setTimeout(()=>reject(Error('解碼函式庫載入逾時')),15000);})
-      ]);
-      if(!lib?.CustomSource||!lib?.CanvasSink||!lib?.Input)throw Error('解碼函式庫 API 不相容');
-      decoderLibrary=lib;return lib;
-    }catch(_){throw Error('Mediabunny 載入失敗或被瀏覽器安全政策阻擋，仍可使用即時擷取及快速掃描');}
-    finally{clearTimeout(timeout);}
+    decoderLibrary=resolveDecoderLibrary();
+    if(!decoderLibrary)throw Error('Tampermonkey 未成功載入 Mediabunny 1.66.0，請檢查腳本的外部依賴是否安裝成功');
+    return decoderLibrary;
   }
-  function checkBackground(q){if(!scanAlive(q))throw Error('已停止');}
+    function checkBackground(q){if(!scanAlive(q))throw Error('已停止');}
   async function waitBackground(q){
     checkBackground(q);
     while(q.paused){await sleep(150);checkBackground(q);}
@@ -283,8 +289,8 @@
     let input=null,iterator=null;
     q.dispose=()=>{abortStreamRequests(q);try{input?.dispose();}catch(_){}};
     try{
-      status('正在載入背景解碼函式庫…');const lib=await loadMediaLibrary();checkBackground(q);
-      let track=null;const attempted=new Set();
+      status('正在檢查背景解碼函式庫…');const lib=await loadMediaLibrary();checkBackground(q);
+      let track=null;const attempted=new Set(),failures=[];
       for(const f of formats){
         await waitBackground(q);if(attempted.size>=4)break;
         if(attempted.has(f.url))continue;attempted.add(f.url);
@@ -301,10 +307,11 @@
           q.startTime=first;q.duration=Math.min(q.expectedDuration,duration);
           q.total=Math.max(1,Math.ceil(q.duration/q.step));q.width=f.width;q.height=f.height;track=candidate;break;
         }catch(e){
+          const reason=String(e?.message||e?.name||'未知錯誤').replace(/https?:\/\/[^\s)]+/g,'[串流網址]').replace(/[\r\n]+/g,' ').slice(0,180);failures.push(f.width+'×'+f.height+'：'+reason);
           try{input?.dispose();}catch(_){}input=null;abortStreamRequests(q);checkBackground(q);
         }
       }
-      if(!track)throw Error('無法取得可讀的影片串流（網址、編碼或分段讀取限制）。請手動使用快速掃描；播放器未被操作');
+      if(!track)throw Error('串流初始化失敗：'+(failures.join('；')||'無可讀格式')+'。播放器未被操作');
       const sink=new lib.CanvasSink(track,{poolSize:2});
       iterator=sink.canvasesAtTimestamps(backgroundTargets(q.startTime,q.duration,q.step))[Symbol.asyncIterator]();
       while(q.index<q.total){
@@ -341,6 +348,7 @@
     if(typeof VideoDecoder==='undefined'){status('瀏覽器不支援 WebCodecs；仍可使用即時擷取及快速掃描。');return;}
     if(!v||!current||current.id!==activeId()||!Number.isFinite(v.duration)||v.duration<=0||ad()||document.querySelector('#movie_player.ytp-live')){status('請開啟已載入的非直播影片，並等待廣告結束。');return;}
     let region;try{region=crop();}catch(e){status(e.message);return;}
+    if(!resolveDecoderLibrary()){status('Mediabunny 1.66.0 未載入；請確認 Tampermonkey 更新完成並檢查外部依賴。即時擷取和快速掃描仍可使用。');return;}
     const response=getCurrentResponse(current.id);
     const formats=directCandidates(response);
     if(!formats.length){status('這部影片未提供可直接讀取的 MP4/WebM 網址。Beta 不處理簽章或權限限制；可改用快速掃描或即時擷取。');return;}
