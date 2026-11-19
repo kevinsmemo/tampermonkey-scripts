@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YouTube Slides · Google Drive Pilot</title>
+<style>
+:root{font:16px/1.5 system-ui;color-scheme:light dark}body{max-width:740px;margin:36px auto;padding:0 18px}h1{font-size:1.5rem}label{display:block;margin:14px 0 6px}input:not([type=file]){box-sizing:border-box;width:100%;padding:10px}button{padding:9px 13px;margin:8px 8px 0 0;cursor:pointer}button:disabled{cursor:default;opacity:.5}#status{padding:12px;white-space:pre-wrap;border:1px solid #8886;border-radius:8px;margin-top:18px;overflow-wrap:anywhere}img{max-width:100%;max-height:320px;display:block;margin-top:14px}small{display:block;color:gray}a{overflow-wrap:anywhere}section{margin:20px 0}
+</style>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<h1>YouTube Slides · Google Drive 測試</h1>
+<p>獨立授權頁。此測試不會改動 YouTube 擷取器、不自動取得影片、不儲存存取權杖。測試會在你授權的 Drive 中新增一個資料夾與 PNG，只有按下上傳才會寫入。</p>
+<label for="clientId">Google OAuth Client ID（Web application）</label>
+<input id="clientId" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+<small>請勿填入 Client Secret 或密碼。授權來源：<span id="origin"></span></small>
+<button id="connect">授權 Google Drive</button><button id="disconnect" disabled>撤銷本次授權</button>
+<section>
+<label for="videoId">影片 ID（11 碼）</label>
+<input id="videoId" maxlength="11" autocomplete="off" spellcheck="false">
+<label for="file">選填：一張已匯出的 PNG（未選則建立測試圖片）</label>
+<input type="file" id="file" accept="image/png">
+<button id="upload" disabled>寫入測試 PNG</button><button id="restore" disabled>讀回最新測試 PNG</button>
+</section>
+<div id="status" role="status" aria-live="polite">等待授權</div>
+<p><a id="folderLink" target="_blank" rel="noopener noreferrer" hidden>在 Google Drive 開啟測試資料夾</a></p>
+<img id="preview" hidden alt="從 Google Drive 讀回的圖片">
+<script>
+'use strict';
+(()=>{
+const $=id=>document.getElementById(id), scope='https://www.googleapis.com/auth/drive.file',folderType='application/vnd.google-apps.folder';
+const defaultVideo='1zFM-c93KCY';let token='',expires=0,busy=false,previewUrl='',client=null,authTimer;
+const validVideo=x=>/^[A-Za-z0-9_-]{11}$/.test(x);
+const vid=new URLSearchParams(location.search).get('v');$('videoId').value=validVideo(vid||'')?vid:defaultVideo;
+$('origin').textContent=location.origin;
+try{$('clientId').value=localStorage.getItem('slideDrivePilotClientId')||'';}catch(_){}
+function active(){return !!token&&Date.now()<expires;}
+function status(s){$('status').textContent=s;}
+function update(){$('connect').disabled=busy;$('disconnect').disabled=busy||!active();$('upload').disabled=$('restore').disabled=busy||!active();}
+function resetToken(){token='';expires=0;update();}
+function setBusy(v){busy=v;update();}
+function failure(e){status('測試失敗：'+String(e?.message||e).slice(0,600));}
+function getVideo(){const id=$('videoId').value.trim();if(!validVideo(id))throw Error('請輸入有效的 11 碼 YouTube Video ID');return id;}
+function connect(){
+ if(busy)return;const id=$('clientId').value.trim();
+ if(!/^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(id)){status('請填入 Web application 類型的 OAuth Client ID。');return;}
+ if(!window.google?.accounts?.oauth2){status('Google Identity Services 尚未載入，請重新整理並確認網路連線。');return;}
+ resetToken();setBusy(true);status('等待 Google 授權...');
+ const done=()=>{clearTimeout(authTimer);setBusy(false);};
+ try{
+  client=google.accounts.oauth2.initTokenClient({client_id:id,scope,include_granted_scopes:false,callback:r=>{
+   done();if(r.error||!r.access_token){resetToken();status('Google 授權失敗：'+(r.error||'未取得存取權杖'));return;}
+   if(!google.accounts.oauth2.hasGrantedAllScopes(r,scope)){resetToken();status('未授予必要的 drive.file 權限。');return;}
+   token=r.access_token;expires=Date.now()+Number(r.expires_in||3600)*1000-15000;
+   try{localStorage.setItem('slideDrivePilotClientId',id);}catch(_){}
+   update();status('Google Drive 已授權。可手動進行上傳或讀回測試。');
+  },error_callback:r=>{done();resetToken();status('Google 授權視窗：'+(r.type||'未知錯誤'));}});
+  authTimer=setTimeout(()=>{done();status('授權等待逾時，可重新點擊授權。');},120000);
+  client.requestAccessToken({prompt:'consent select_account'});
+ }catch(e){done();resetToken();failure(e);}
+}
+async function api(url,options={}){
+ if(!active()){resetToken();throw Error('存取權杖已過期，請重新授權');}
+ const headers=new Headers(options.headers||{});headers.set('Authorization','Bearer '+token);
+ const r=await fetch(url,{...options,headers});
+ if(r.status===401){resetToken();throw Error('Google 授權已失效，請重新授權');}
+ if(!r.ok){let msg='';try{msg=(await r.json())?.error?.message||'';}catch(_){}throw Error('Drive HTTP '+r.status+' '+msg);}
+ return r;
+}
+const drive='https://www.googleapis.com/drive/v3/files',upload='https://www.googleapis.com/upload/drive/v3/files';
+async function list(q,fields='files(id,name,webViewLink),nextPageToken',pageSize=100){
+ const p=new URLSearchParams({q:'trashed = false and ('+q+')',fields,pageSize:String(pageSize),orderBy:'createdTime desc'});
+ const r=await api(drive+'?'+p);return (await r.json()).files||[];
+}
+async function folder(create){
+ const q="mimeType = '"+folderType+"' and appProperties has { key='slidesPilot' and value='root-v1' }";
+ const found=(await list(q))[0];if(found){setFolder(found.id);return found.id;}
+ if(!create)throw Error('尚無測試資料夾，請先進行上傳。');
+ const r=await api(drive+'?fields=id,name,webViewLink',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'YouTube Slides - Sync Test',mimeType:folderType,appProperties:{slidesPilot:'root-v1'}})});
+ const f=await r.json();setFolder(f.id);return f.id;
+}
+function setFolder(id){const a=$('folderLink');a.href='https://drive.google.com/drive/folders/'+encodeURIComponent(id);a.hidden=false;}
+async function samplePng(id){
+ const file=$('file').files[0];
+ if(file){if(file.size>5*1024*1024)throw Error('測試版單張圖片最多 5 MiB');const bytes=new Uint8Array(await file.slice(0,8).arrayBuffer());if(bytes.join(',')!=='137,80,78,71,13,10,26,10')throw Error('請選擇有效的 PNG 檔案');return new Blob([file],{type:'image/png'});}
+ const c=document.createElement('canvas');c.width=640;c.height=360;const ctx=c.getContext('2d');ctx.fillStyle='#10233b';ctx.fillRect(0,0,640,360);ctx.fillStyle='#fff';ctx.font='bold 28px sans-serif';ctx.fillText('YouTube Slides · Drive test',24,100);ctx.font='20px monospace';ctx.fillText(id,24,160);ctx.fillText(new Date().toISOString(),24,210);return new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(Error('PNG 產生失敗')),'image/png'));
+}
+function digest(blob){return blob.arrayBuffer().then(async b=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',b))).map(n=>n.toString(16).padStart(2,'0')).join(''));}
+function multipart(meta,png){
+ const boundary='slides_'+crypto.randomUUID().replace(/-/g,'');
+ const body=new Blob(['--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)+'\r\n--'+boundary+'\r\nContent-Type: image/png\r\n\r\n',png,'\r\n--'+boundary+'--\r\n']);
+ return {body,headers:{'Content-Type':'multipart/related; boundary='+boundary}};
+}
+async function readPng(id){const r=await api(drive+'/'+encodeURIComponent(id)+'?alt=media');const b=await r.blob();const sig=new Uint8Array(await b.slice(0,8).arrayBuffer());if(sig.join(',')!=='137,80,78,71,13,10,26,10')throw Error('讀回資料不是 PNG');return b;}
+function show(b){if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=URL.createObjectURL(b);$('preview').src=previewUrl;$('preview').hidden=false;}
+async function run(action){if(busy)return;setBusy(true);try{await action();}catch(e){failure(e);}finally{setBusy(false);}}
+$('connect').onclick=connect;
+$('disconnect').onclick=()=>{if(!active())return;setBusy(true);const t=token;resetToken();if(previewUrl){URL.revokeObjectURL(previewUrl);previewUrl='';$('preview').hidden=true;}$('folderLink').hidden=true;google.accounts.oauth2.revoke(t,r=>{setBusy(false);status(r?.successful?'本次 Google 授權已撤銷。測試檔未刪除。':'本機權杖已清除，Google 授權撤銷結果未確認。');});};
+$('upload').onclick=()=>run(async()=>{
+ const id=getVideo(),png=await samplePng(id),hash=await digest(png);status('建立測試資料夾並上傳 PNG...');
+ const parent=await folder(true);
+ const meta={name:id+'_'+new Date().toISOString().replace(/[:.]/g,'-')+'_test.png',mimeType:'image/png',parents:[parent],appProperties:{slidesPilot:'png-v1',videoId:id,sha256:hash}};
+ const file=await (await api(upload+'?uploadType=multipart&fields=id,name,size,webViewLink',{method:'POST',...multipart(meta,png)})).json();
+ status('已上傳，正在從 Drive 讀回並驗證 SHA-256...');
+ const back=await readPng(file.id),actual=await digest(back);if(actual!==hash)throw Error('上傳成功，但讀回圖片的 SHA-256 不一致');
+ show(back);status('上傳及讀回成功（SHA-256 相同）\n影片 ID：'+id+'\n檔案：'+file.name+'\n大小：'+back.size.toLocaleString()+' bytes');
+});
+$('restore').onclick=()=>run(async()=>{
+ const id=getVideo(),parent=await folder(false);
+ if(!/^[A-Za-z0-9_-]+$/.test(parent))throw Error('資料夾 ID 格式不符');
+ const q="'"+parent+"' in parents and mimeType = 'image/png' and appProperties has { key='slidesPilot' and value='png-v1' } and appProperties has { key='videoId' and value='"+id+"' }";
+ const f=(await list(q,'files(id,name,appProperties),nextPageToken',1))[0];if(!f)throw Error('此影片沒有已上傳的測試 PNG');
+ const b=await readPng(f.id),actual=await digest(b);if(!f.appProperties?.sha256||actual!==f.appProperties.sha256)throw Error('讀回圖片完整性驗證失敗');
+ show(b);status('讀回歷史截圖成功（SHA-256 相同）\n影片 ID：'+id+'\n檔案：'+f.name+'\n大小：'+b.size.toLocaleString()+' bytes');
+});
+window.addEventListener('pagehide',()=>{token='';if(previewUrl)URL.revokeObjectURL(previewUrl);});window.addEventListener('pageshow',update);
+update();
+})();
+</script>
+</body>
+</html>
