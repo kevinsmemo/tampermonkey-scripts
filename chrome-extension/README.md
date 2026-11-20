@@ -1,4 +1,4 @@
-# YouTube Slides Extractor — Chrome Extension v0.3.7 (Cloud Alpha)
+# YouTube Slides Extractor — Chrome Extension v0.3.8 (Cloud Alpha)
 
 ## 安裝與連接
 
@@ -9,6 +9,12 @@
 5. 授權後重整 YouTube，點歷史紀錄的「更新索引」。
 
 固定擴充套件 ID：kbghnfojpidgmkfmjnajikpnhgcpphan
+
+## v0.3.8
+- 裁切範圍的提示字卡改為可操作控制列，優先顯示在綠色虛線框上方；當選取框貼近視窗上緣時，退回框內上方避免被裁切。提示列與影片畫面拖曳層分開，X 按鈕不會觸發裁切拖曳。
+- 新增「×」按鈕，標示「儲存裁切範圍並關閉」。按下後將該影片的百分比座標保存到 Chrome 擴充套件儲存空間，確認成功後立即關閉綠色框。下次開啟同一部影片可恢復先前裁切設定。
+- 取消原本停止操作 4 秒後自動隱藏編輯框的計時器。按 Esc 可關閉編輯器並撤銷本次開啟後的調整；影片切換與頁面隱藏等安全關閉保留。
+- 儲存失敗會保留編輯框並顯示錯誤，不會假裝儲存成功。原有 PNG、Google Drive 同步、影片索引、固定擴充套件 ID 與 OAuth 不變。
 
 ## v0.3.7
 - 將 YouTube 網域 `localStorage` 內的歷史影片張數與標題，安全遷移至擴充套件專用 `chrome.storage.local`，儲存使用每部影片獨立 key，不與其他網站共享。原資料在成功寫入後才刪除；若遷移失敗，保留原資料以供重試。
