@@ -1,4 +1,4 @@
-# YouTube Slides Extractor — Chrome Extension v0.3.5 (Cloud Alpha)
+# YouTube Slides Extractor — Chrome Extension v0.3.6 (Cloud Alpha)
 
 ## 安裝與連接
 
@@ -9,6 +9,14 @@
 5. 授權後重整 YouTube，點歷史紀錄的「更新索引」。
 
 固定擴充套件 ID：kbghnfojpidgmkfmjnajikpnhgcpphan
+
+## v0.3.6
+- 索引寫入由固定每 2 分鐘改為事件驅動：最近一次 PNG 成功上傳後若閒置滿 5 分鐘，才更新 `index.json` 與 `INDEX.md`；持續上傳時，最遲在首次待更新標記 30 分鐘後執行一次快照更新。
+- 先將待更新影片 ID、首次與最近活動時間寫入 `chrome.storage.local`，才開始傳送本批 PNG，避免 Drive 成功上傳後、排程前 Chrome 意外關閉造成漏記。
+- Chrome 啟動或擴充套件更新時，重新檢查待上傳 PNG 與待更新索引，依持久化時間重建 alarm；逾期會安排盡快補寫。不依賴 Chrome 關閉事件。
+- 只有 JSON 與 Markdown 都成功寫入，才清除已完成影片的待更新紀錄。尚有 PNG 在傳送中的影片保持待更新；索引失敗保留紀錄並在 5 分鐘後重試。
+- 影片截圖存本機、PNG 即時上傳、15 分鐘背景讀取、按需圖片載入（Lazy Load）、完整修復與固定擴充套件 ID 均維持原狀。
+- 索引排程採 Chrome alarms，實際觸發可能受瀏覽器關閉、系統休眠、網路、電腦負載等影響；上述時間是目標時間而非保證的即時觸發。
 
 ## v0.3.5
 - 新增 `YouTube Slides/index.json`：只儲存每部影片 ID、標題、資料夾 ID、投影片張數、更新時間；不儲存 PNG 或縮圖。
