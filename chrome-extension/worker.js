@@ -13,12 +13,12 @@ function read(store,k){return tx([store],'readonly',(t,done)=>{const r=t.objectS
 function records(index,k){return tx(['meta'],'readonly',(t,done)=>{const os=t.objectStore('meta'),r=index?os.index(index).getAll(k):os.getAll();r.onsuccess=()=>done(r.result);});}
 function saveRecord(r,blob){return tx(['meta','bytes'],'readwrite',(t,done)=>{t.objectStore('meta').put(r);if(blob)t.objectStore('bytes').put(blob,r.key);done(r);});}
 async function config(){return (await chrome.storage.local.get('config')).config||null;}
-let syncRunning=false;
+let syncRunning=false,immediateSyncQueued=false,automaticRetryAfter=0;
 function pendingCount(){return tx(['meta'],'readonly',(t,done)=>{const r=t.objectStore('meta').index('state').count('pending');r.onsuccess=()=>done(r.result);});}
 async function updateHealth(patch){const old=(await chrome.storage.local.get('syncHealth')).syncHealth||{};await chrome.storage.local.set({syncHealth:{...old,...patch}});}
 async function state(){
  const c=await config(),pending=await pendingCount(),data=await chrome.storage.local.get(['lastSync','syncHealth']),health=data.syncHealth||{};
- return {connected:!!c,pending,mode:c?.mode||'',lastSync:data.lastSync||'',syncing:syncRunning,lastCheckedAt:health.lastCheckedAt||0,lastUploadedAt:health.lastUploadedAt||0,checkError:health.checkError||'',syncError:health.syncError||'',clientConfigured:!!chrome.runtime.getManifest().oauth2?.client_id};
+ return {connected:!!c,pending,mode:c?.mode||'',lastSync:data.lastSync||'',syncing:syncRunning,lastCheckedAt:health.lastCheckedAt||0,lastUploadedAt:health.lastUploadedAt||0,lastUploadCount:health.lastUploadCount||0,checkError:health.checkError||'',syncError:health.syncError||'',clientConfigured:!!chrome.runtime.getManifest().oauth2?.client_id};
 }
 async function details(){const c=await config();return {...await state(),root:c?.root||'',rootName:c?.rootName||''};}
 async function verifyConnection(){
@@ -96,14 +96,30 @@ async function flush(checkWhenEmpty=false){
   const t=await auth(c);await checkRoot(t,c);verified=true;
   await updateHealth({lastCheckedAt:Date.now(),checkError:''});
   for(const r of pending.slice(0,5)){await uploadOne(t,c,r);uploaded++;}
-  await updateHealth({syncError:'',...(uploaded?{lastUploadedAt:Date.now()}:{})});
+  await updateHealth({syncError:'',...(uploaded?{lastUploadedAt:Date.now(),lastUploadCount:uploaded}:{})});
   await chrome.storage.local.set({lastSync:'同步批次完成 '+new Date().toLocaleString()});
  }catch(e){
   const message=String(e?.message||e).slice(0,240);
-  await updateHealth({syncError:message,...(!verified?{checkError:message}:{}),...(uploaded?{lastUploadedAt:Date.now()}:{})});
+  await updateHealth({syncError:message,...(!verified?{checkError:message}:{}),...(uploaded?{lastUploadedAt:Date.now(),lastUploadCount:uploaded}:{})});
   await chrome.storage.local.set({lastSync:'待同步：'+message});
  }finally{syncRunning=false;await reconcileAlarm();}
  return state();
+}
+// After a durable local write, coalesce immediate Drive uploads.
+function requestImmediateSync(){
+ if(immediateSyncQueued||Date.now()<automaticRetryAfter)return;
+ immediateSyncQueued=true;
+ void queue(async()=>{
+  try{
+   for(let round=0;round<3;round++){
+    const before=await pendingCount();if(!before)break;
+    const result=await flush();
+    if(result.syncError){automaticRetryAfter=Date.now()+60000;break;}
+    if(result.pending>=before)break;
+   }
+  }catch(_){automaticRetryAfter=Date.now()+60000;}
+  finally{immediateSyncQueued=false;}
+ }).catch(()=>{immediateSyncQueued=false;});
 }
 chrome.alarms.onAlarm.addListener(a=>{if(a.name==='slides-sync')void queue(flush).catch(()=>{});});
 const resumePending=()=>void queue(async()=>{if(await pendingCount())await arm();}).catch(()=>{});
@@ -121,7 +137,7 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  case 'verify':data=await queue(verifyConnection);break;
  case 'options':await chrome.runtime.openOptionsPage();data=true;break;
  case 'connect':data=await queue(()=>connect(m));await arm();void queue(flush).catch(()=>{});break;
- case 'put':data=await queueWrite(()=>put(m));try{await arm();}catch(_){}break;
+ case 'put':data=await queueWrite(()=>put(m));try{await arm();}catch(_){}requestImmediateSync();break;
  case 'list':data=await queue(()=>catalog(m.videoId));break;
  case 'get':data=await queue(()=>get(m));break;
  case 'index':data=await queue(index);break;
