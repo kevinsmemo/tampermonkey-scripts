@@ -33,9 +33,9 @@
       parent.append(el);
     }
   }
-  appendUI(shadow, [["style",{},["\n  *{box-sizing:border-box}button,input,select{font:inherit}button{cursor:pointer;color:inherit;border:1px solid #47515e;background:#303945;border-radius:6px;padding:7px 9px}button:hover:not(:disabled){background:#435269}button:disabled{opacity:.4;cursor:default}#toggle{display:inline-flex;align-items:center;justify-content:center;min-height:46px;min-width:148px;padding:11px 16px;border:2px solid #93c5fd;border-radius:12px;background:#1d4ed8;color:#fff;font-size:16px;font-weight:700;line-height:1.25;white-space:nowrap;box-shadow:0 4px 20px #0009}#toggle:hover{background:#1e40af}#toggle:focus-visible{outline:3px solid #fff;outline-offset:3px}#toggle[data-running=true]{background:#166534;border-color:#86efac}#toggle[data-running=true]:hover{background:#14532d}#panel{width:min(360px,calc(100vw - 32px));max-height:75vh;overflow:auto;background:#20262f;border:1px solid #48515e;border-radius:10px;padding:12px;box-shadow:0 5px 28px #0007;margin-bottom:7px}#panel[hidden]{display:none}.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.muted{color:#aeb9c9;font-size:12px;line-height:1.5}.grow{flex:1;min-width:0}input[type=number],select{background:#151a21;color:#e7eaf0;border:1px solid #47515e;border-radius:4px;padding:4px;width:65px}label{display:flex;align-items:center;gap:4px}#status{min-height:36px;overflow-wrap:anywhere}#title{font-weight:400;font-size:12px;line-height:1.5;color:#aeb9c9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#sessionPanel[hidden]{display:none}#sessionPanel{border-top:0;margin:4px 0;padding-top:0;font-size:12px}#sessionPanel summary{color:#aeb9c9;margin-bottom:5px}#list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:245px;overflow:auto}.tile{border:1px solid #47515e;border-radius:5px;overflow:hidden}.tile img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#111;cursor:pointer}.tile .row{justify-content:space-between;margin:3px;padding:0}.tile button{padding:3px 5px;font-size:11px}.primary{background:#315b79}#session{width:100%;max-width:100%}details{border-top:1px solid #424b57;padding-top:8px}summary{cursor:pointer}.right{display:flex;justify-content:flex-end}#quickStart{background:#315b79;font-weight:600}#scanProgress{width:100%;height:10px;accent-color:#60a5fa}#scanBox{border-top:1px solid #424b57;padding-top:8px}#scanStep{width:76px}#scanBox[hidden],#scanReport[hidden]{display:none}\n#viewCurrent[hidden],#viewHistory[hidden]{display:none}#viewTabs{display:flex;gap:6px;margin:8px 0 12px}#viewTabs button{flex:1}#viewTabs button[aria-pressed=true]{background:#315b79;border-color:#93c5fd;font-weight:600}#historySearch{background:#151a21;color:#e7eaf0;border:1px solid #47515e;border-radius:6px;padding:8px;width:100%;min-width:0}#historyList{max-height:48vh;overflow:auto}#historyList a{display:block;color:inherit;text-decoration:none;padding:9px 4px;border-bottom:1px solid #424b57}#historyList a:hover{background:#303945}.histline{display:flex;align-items:center;gap:8px}.histtitle{flex:1;min-width:0;overflow-wrap:anywhere;font-weight:600}.histcount{white-space:nowrap;color:#93c5fd}.histmeta{color:#aeb9c9;font-size:11px;margin-top:4px}#historyMore[hidden]{display:none}#cloudSummary{font-size:11px;line-height:1.5;color:#aeb9c9;padding:6px 9px;border:1px solid #424b57;border-radius:6px;margin:5px 0 8px;overflow-wrap:anywhere}#cloudSummary[data-tone=good]{color:#a7f3d0}#cloudSummary[data-tone=warn]{color:#fcd34d}#cloudSummary[data-tone=bad]{color:#fda4af}"]],"\n  ",["section",{"id":"panel","hidden":""},[["div",{"class":"row"},[["strong",{"class":"grow"},["YouTube Slides Extractor"]],["span",{"class":"muted"},["v0.3.6-alpha"]]]],["div",{"id":"cloudSummary","role":"status","aria-live":"polite"},["Google Drive · 讀取狀態…"]],["div",{"id":"viewTabs","role":"group","aria-label":"投影片檢視"},[["button",{"id":"tabCurrent","aria-pressed":"true"},["目前影片"]],["button",{"id":"tabHistory","aria-pressed":"false"},["歷史紀錄"]]]],["div",{"id":"viewCurrent"},[["div",{"id":"title"},[]],["details",{"id":"sessionPanel","hidden":""},[["summary",{},["切換未儲存的暫存影片"]],["select",{"id":"session","aria-label":"暫存影片工作階段"},[]]]],["div",{"class":"row"},[["button",{"id":"start","class":"primary"},["開始自動擷取"]],["button",{"id":"stop"},["停止"]],["button",{"id":"manual"},["手動擷取"]]]],["div",{"class":"row"},[["label",{},["間隔 ",["select",{"id":"interval"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2","selected":""},["2 秒"]],["option",{"value":"5"},["5 秒"]]]]]],["label",{},["靈敏度 ",["select",{"id":"sensitivity"},[["option",{"value":"0.022"},["高"]],["option",{"value":"0.045","selected":""},["中"]],["option",{"value":"0.085"},["低"]]]]]]]],["div",{"id":"scanBox"},[["div",{"class":"row"},[["button",{"id":"quickStart","class":"grow"},["快速掃描（不需播放）"]],["button",{"id":"scanPause"},["暫停"]]]],["div",{"class":"row"},[["label",{},["掃描間隔 ",["select",{"id":"scanStep"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2"},["2 秒"]],["option",{"value":"3"},["3 秒"]],["option",{"value":"5","selected":""},["5 秒"]],["option",{"value":"10"},["10 秒"]]]]]],["label",{},[["input",{"id":"autoExport","type":"checkbox","checked":""},[]],"完成自動匯出"]]]],["div",{"class":"muted"},["從影片開頭逐點跳轉；請保持分頁可見。PNG 原始解析度。"]],["div",{"id":"scanReport","hidden":""},[["progress",{"id":"scanProgress","max":"100","value":"0"},[]],["div",{"id":"scanInfo","class":"muted","aria-live":"polite"},[]]]]]],["details",{},[["summary",{},["擷取區域與模式"]],["div",{"class":"muted"},["預設完整畫面。點擊按鈕後，用滑鼠直接調整影片上的虛線框。"]],["div",{"class":"row"},[["button",{"id":"cropAdjust","class":"primary grow"},["調整擷取範圍"]],["button",{"id":"cropReset"},["恢復全畫面"]]]],["div",{"id":"cropSummary","class":"muted","aria-live":"polite"},["目前：完整畫面"]],["details",{},[["summary",{},["精確座標（%）"]],["div",{"class":"row"},[["label",{},["左 % ",["input",{"id":"left","type":"number","min":"0","max":"95","value":"0","step":"0.1"},[]]]],["label",{},["上 % ",["input",{"id":"top","type":"number","min":"0","max":"95","value":"0","step":"0.1"},[]]]],["label",{},["右 % ",["input",{"id":"right","type":"number","min":"5","max":"100","value":"100","step":"0.1"},[]]]],["label",{},["下 % ",["input",{"id":"bottom","type":"number","min":"5","max":"100","value":"100","step":"0.1"},[]]]]]]]],["div",{"class":"muted"},["拖曳四角或邊線縮放、拖曳框內移動；全畫面或框外可重新圈選。停止操作 4 秒後隱藏。已有截圖時，變更範圍可能影響去重。"]],["div",{"class":"row"},[["label",{},[["input",{"id":"forceTab","type":"checkbox"},[]],"強制使用分頁擷取"]]]],["div",{"class":"muted"},["若要求分享畫面，請只選「這個分頁」（不是整個螢幕）。不錄音；依設定同步投影片 PNG。即時擷取需播放；快速掃描需可直接讀取影片。"]]]],["details",{},[["summary",{},["直接同步／Google Drive"]],["div",{"class":"muted"},["透過擴充套件直接連接 Google Drive。未登入或離線時，先寫入擴充套件本機資料庫。"]],["div",{"class":"row"},[["button",{"id":"folderChoose"},["Google Drive 設定"]],["button",{"id":"folderRefresh"},["重新讀取／同步"]]]],["div",{"id":"folderInfo","class":"muted","aria-live":"polite"},["正在檢查資料夾…"]]]],["div",{"class":"row"},[["span",{"id":"count","class":"grow"},["0 張"]],["button",{"id":"export"},["匯出 ZIP"]],["button",{"id":"clear"},["清空（停用）"]]]],["div",{"id":"status","class":"muted","role":"status","aria-live":"polite"},["開啟影片後開始。"]],["div",{"id":"list"},[]],["div",{"class":"muted"},["點開面板才載入 PNG。離線截圖先存本機；上方顯示全域待同步張數。測試版暫停刪除，避免誤刪雲端歷史資料。"]]]],["div",{"id":"viewHistory","hidden":""},[["input",{"id":"historySearch","type":"search","placeholder":"搜尋影片標題或 ID…","aria-label":"搜尋歷史影片"},[]],["div",{"class":"row"},[["span",{"id":"historySummary","class":"grow muted"},["尚無紀錄"]],["button",{"id":"historyRefresh"},["更新索引"]],["button",{"id":"historyRebuild","title":"重新掃描所有影片資料夾與 PNG 檔名"},["完整修復"]]]],["div",{"id":"historyStatus","class":"muted","role":"status","aria-live":"polite"},["雲端／本機索引；點更新索引讀取其他裝置紀錄。"]],["div",{"id":"historyList"},[]],["button",{"id":"historyMore","hidden":""},["載入更多"]]]]]],["div",{"class":"right"},[["button",{"id":"toggle","aria-expanded":"false"},["投影片 Slides · 0"]]]]]);
+  appendUI(shadow, [["style",{},["\n  *{box-sizing:border-box}button,input,select{font:inherit}button{cursor:pointer;color:inherit;border:1px solid #47515e;background:#303945;border-radius:6px;padding:7px 9px}button:hover:not(:disabled){background:#435269}button:disabled{opacity:.4;cursor:default}#toggle{display:inline-flex;align-items:center;justify-content:center;min-height:46px;min-width:148px;padding:11px 16px;border:2px solid #93c5fd;border-radius:12px;background:#1d4ed8;color:#fff;font-size:16px;font-weight:700;line-height:1.25;white-space:nowrap;box-shadow:0 4px 20px #0009}#toggle:hover{background:#1e40af}#toggle:focus-visible{outline:3px solid #fff;outline-offset:3px}#toggle[data-running=true]{background:#166534;border-color:#86efac}#toggle[data-running=true]:hover{background:#14532d}#panel{width:min(360px,calc(100vw - 32px));max-height:75vh;overflow:auto;background:#20262f;border:1px solid #48515e;border-radius:10px;padding:12px;box-shadow:0 5px 28px #0007;margin-bottom:7px}#panel[hidden]{display:none}.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.muted{color:#aeb9c9;font-size:12px;line-height:1.5}.grow{flex:1;min-width:0}input[type=number],select{background:#151a21;color:#e7eaf0;border:1px solid #47515e;border-radius:4px;padding:4px;width:65px}label{display:flex;align-items:center;gap:4px}#status{min-height:36px;overflow-wrap:anywhere}#title{font-weight:400;font-size:12px;line-height:1.5;color:#aeb9c9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#sessionPanel[hidden]{display:none}#sessionPanel{border-top:0;margin:4px 0;padding-top:0;font-size:12px}#sessionPanel summary{color:#aeb9c9;margin-bottom:5px}#list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:245px;overflow:auto}.tile{border:1px solid #47515e;border-radius:5px;overflow:hidden}.tile img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#111;cursor:pointer}.tile .row{justify-content:space-between;margin:3px;padding:0}.tile button{padding:3px 5px;font-size:11px}.primary{background:#315b79}#session{width:100%;max-width:100%}details{border-top:1px solid #424b57;padding-top:8px}summary{cursor:pointer}.right{display:flex;justify-content:flex-end}#quickStart{background:#315b79;font-weight:600}#scanProgress{width:100%;height:10px;accent-color:#60a5fa}#scanBox{border-top:1px solid #424b57;padding-top:8px}#scanStep{width:76px}#scanBox[hidden],#scanReport[hidden]{display:none}\n#viewCurrent[hidden],#viewHistory[hidden]{display:none}#viewTabs{display:flex;gap:6px;margin:8px 0 12px}#viewTabs button{flex:1}#viewTabs button[aria-pressed=true]{background:#315b79;border-color:#93c5fd;font-weight:600}#historySearch{background:#151a21;color:#e7eaf0;border:1px solid #47515e;border-radius:6px;padding:8px;width:100%;min-width:0}#historyList{max-height:48vh;overflow:auto}#historyList a{display:block;color:inherit;text-decoration:none;padding:9px 4px;border-bottom:1px solid #424b57}#historyList a:hover{background:#303945}.histline{display:flex;align-items:center;gap:8px}.histtitle{flex:1;min-width:0;overflow-wrap:anywhere;font-weight:600}.histcount{white-space:nowrap;color:#93c5fd}.histmeta{color:#aeb9c9;font-size:11px;margin-top:4px}#historyMore[hidden]{display:none}#cloudSummary{font-size:11px;line-height:1.5;color:#aeb9c9;padding:6px 9px;border:1px solid #424b57;border-radius:6px;margin:5px 0 8px;overflow-wrap:anywhere}#cloudSummary[data-tone=good]{color:#a7f3d0}#cloudSummary[data-tone=warn]{color:#fcd34d}#cloudSummary[data-tone=bad]{color:#fda4af}"]],"\n  ",["section",{"id":"panel","hidden":""},[["div",{"class":"row"},[["strong",{"class":"grow"},["YouTube Slides Extractor"]],["span",{"class":"muted"},["v0.3.7-alpha"]]]],["div",{"id":"cloudSummary","role":"status","aria-live":"polite"},["Google Drive · 讀取狀態…"]],["div",{"id":"viewTabs","role":"group","aria-label":"投影片檢視"},[["button",{"id":"tabCurrent","aria-pressed":"true"},["目前影片"]],["button",{"id":"tabHistory","aria-pressed":"false"},["歷史紀錄"]]]],["div",{"id":"viewCurrent"},[["div",{"id":"title"},[]],["details",{"id":"sessionPanel","hidden":""},[["summary",{},["切換未儲存的暫存影片"]],["select",{"id":"session","aria-label":"暫存影片工作階段"},[]]]],["div",{"class":"row"},[["button",{"id":"start","class":"primary"},["開始自動擷取"]],["button",{"id":"stop"},["停止"]],["button",{"id":"manual"},["手動擷取"]]]],["div",{"class":"row"},[["label",{},["間隔 ",["select",{"id":"interval"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2","selected":""},["2 秒"]],["option",{"value":"5"},["5 秒"]]]]]],["label",{},["靈敏度 ",["select",{"id":"sensitivity"},[["option",{"value":"0.022"},["高"]],["option",{"value":"0.045","selected":""},["中"]],["option",{"value":"0.085"},["低"]]]]]]]],["div",{"id":"scanBox"},[["div",{"class":"row"},[["button",{"id":"quickStart","class":"grow"},["快速掃描（不需播放）"]],["button",{"id":"scanPause"},["暫停"]]]],["div",{"class":"row"},[["label",{},["掃描間隔 ",["select",{"id":"scanStep"},[["option",{"value":"1"},["1 秒"]],["option",{"value":"2"},["2 秒"]],["option",{"value":"3"},["3 秒"]],["option",{"value":"5","selected":""},["5 秒"]],["option",{"value":"10"},["10 秒"]]]]]],["label",{},[["input",{"id":"autoExport","type":"checkbox","checked":""},[]],"完成自動匯出"]]]],["div",{"class":"muted"},["從影片開頭逐點跳轉；請保持分頁可見。PNG 原始解析度。"]],["div",{"id":"scanReport","hidden":""},[["progress",{"id":"scanProgress","max":"100","value":"0"},[]],["div",{"id":"scanInfo","class":"muted","aria-live":"polite"},[]]]]]],["details",{},[["summary",{},["擷取區域與模式"]],["div",{"class":"muted"},["預設完整畫面。點擊按鈕後，用滑鼠直接調整影片上的虛線框。"]],["div",{"class":"row"},[["button",{"id":"cropAdjust","class":"primary grow"},["調整擷取範圍"]],["button",{"id":"cropReset"},["恢復全畫面"]]]],["div",{"id":"cropSummary","class":"muted","aria-live":"polite"},["目前：完整畫面"]],["details",{},[["summary",{},["精確座標（%）"]],["div",{"class":"row"},[["label",{},["左 % ",["input",{"id":"left","type":"number","min":"0","max":"95","value":"0","step":"0.1"},[]]]],["label",{},["上 % ",["input",{"id":"top","type":"number","min":"0","max":"95","value":"0","step":"0.1"},[]]]],["label",{},["右 % ",["input",{"id":"right","type":"number","min":"5","max":"100","value":"100","step":"0.1"},[]]]],["label",{},["下 % ",["input",{"id":"bottom","type":"number","min":"5","max":"100","value":"100","step":"0.1"},[]]]]]]]],["div",{"class":"muted"},["拖曳四角或邊線縮放、拖曳框內移動；全畫面或框外可重新圈選。停止操作 4 秒後隱藏。已有截圖時，變更範圍可能影響去重。"]],["div",{"class":"row"},[["label",{},[["input",{"id":"forceTab","type":"checkbox"},[]],"強制使用分頁擷取"]]]],["div",{"class":"muted"},["若要求分享畫面，請只選「這個分頁」（不是整個螢幕）。不錄音；依設定同步投影片 PNG。即時擷取需播放；快速掃描需可直接讀取影片。"]]]],["details",{},[["summary",{},["直接同步／Google Drive"]],["div",{"class":"muted"},["透過擴充套件直接連接 Google Drive。未登入或離線時，先寫入擴充套件本機資料庫。"]],["div",{"class":"row"},[["button",{"id":"folderChoose"},["Google Drive 設定"]],["button",{"id":"folderRefresh"},["重新讀取／同步"]]]],["div",{"id":"folderInfo","class":"muted","aria-live":"polite"},["正在檢查資料夾…"]]]],["div",{"class":"row"},[["span",{"id":"count","class":"grow"},["0 張"]],["button",{"id":"export"},["匯出 ZIP"]],["button",{"id":"clear"},["清空（停用）"]]]],["div",{"id":"status","class":"muted","role":"status","aria-live":"polite"},["開啟影片後開始。"]],["div",{"id":"list"},[]],["div",{"class":"muted"},["點開面板才載入 PNG。離線截圖先存本機；上方顯示全域待同步張數。測試版暫停刪除，避免誤刪雲端歷史資料。"]]]],["div",{"id":"viewHistory","hidden":""},[["input",{"id":"historySearch","type":"search","placeholder":"搜尋影片標題或 ID…","aria-label":"搜尋歷史影片"},[]],["div",{"class":"row"},[["span",{"id":"historySummary","class":"grow muted"},["尚無紀錄"]],["button",{"id":"historyRefresh"},["更新索引"]],["button",{"id":"historyRebuild","title":"重新掃描所有影片資料夾與 PNG 檔名"},["完整修復"]]]],["div",{"id":"historyStatus","class":"muted","role":"status","aria-live":"polite"},["雲端／本機索引；點更新索引讀取其他裝置紀錄。"]],["div",{"id":"historyList"},[]],["button",{"id":"historyMore","hidden":""},["載入更多"]]]]]],["div",{"class":"right"},[["button",{"id":"toggle","aria-expanded":"false"},["投影片 Slides · 0"]]]]]);
   (document.body||document.documentElement).append(host);
-  console.info("[YouTube Slides Extractor] v0.3.6-alpha ready");
+  console.info("[YouTube Slides Extractor] v0.3.7-alpha ready");
   const $=id=>shadow.getElementById(id), status=t=>{$('status').textContent=t;};
   const video=()=>document.querySelector('#movie_player video.html5-main-video')||document.querySelector('video.html5-main-video');
   const activeId=()=>idOf(location.href);
@@ -381,8 +381,8 @@
   }
 
 
-  // Optional user-selected filesystem. No external scripts, OAuth, API calls, or
-  // direct uploads. IndexedDB stores the selected directory handle; localStorage stores small per-video count hints.
+  // Optional storage binding used by the cloud-first extension. Offline PNGs
+  // live in extension IndexedDB; lightweight history counts use extension storage.
   let folderHandle=null,folderBusy=0,folderPending=0,folderAccess=false,folderNote='',folderQueue=Promise.resolve();
   const folderSupported=()=>!!chrome.runtime?.id;
   const cloudLocal={name:'本機離線資料庫'};let cloudState={connected:false,pending:0},cloudStatusAt=0,cloudStatusBusy=false,cloudStatusReady=false;
@@ -406,11 +406,12 @@
   function toBase64(blob){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(reader.error);reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.readAsDataURL(blob);});}
   function fromBase64(raw,modified){const bytes=Uint8Array.from(atob(raw),c=>c.charCodeAt(0));return new File([bytes],'slide.png',{type:'image/png',lastModified:modified||0});}
 
-  // Count hints are per browser/origin; never enumerate a directory or read PNG
-  // merely because a YouTube watch page was opened. Access permission is checked
-  // separately. The actual filesystem remains the source of truth.
+  // History counts live in extension storage and are rendered without fetching PNGs.
+  // The original Drive files remain authoritative; legacy youtube.com storage is
+  // read only once for a safe migration.
   const countPrefix='dg-slides-extension-count-v1:';
-  const historyIndex=new Map();
+  const historyIndex=new Map();let positiveHistoryCount=0;
+  const pendingHistory=new Map();let historyFlushTimer=null,historyFlushBusy=false,historyReady=false;
   let historyDirty=true,historyLimit=50,historyView=false,historyUpdating=false;
   function validIndexId(id){return /^[A-Za-z0-9_-]{11}$/.test(id||'');}
   function cleanTitle(title,id){
@@ -424,33 +425,87 @@
       return {count:v.count,updatedAt:Number.isFinite(v.updatedAt)?v.updatedAt:0,title:typeof v.title==='string'?v.title.slice(0,350):''};
     }catch(_){return null;}
   }
-  function readHistoryIndex(){
+  function setHistoryRow(id,row){
+    const prior=historyIndex.get(id),oldPositive=!!(prior&&prior.count>0),newPositive=!!(row&&row.count>0);
+    if(oldPositive!==newPositive)positiveHistoryCount+=newPositive?1:-1;
+    if(row)historyIndex.set(id,row);else historyIndex.delete(id);
+    const session=sessions.get(id);if(session&&!session.loaded)session.diskCount=row?.count??null;
+  }
+  function readLegacyHistory(){
+    const rows=[],keys=[];
     try{
       for(let i=0;i<localStorage.length;i++){
-        const k=localStorage.key(i);if(!k?.startsWith(countPrefix))continue;
-        const id=k.slice(countPrefix.length);if(!validIndexId(id))continue;
-        const r=decodeRecord(localStorage.getItem(k));if(r)historyIndex.set(id,r);
+        const key=localStorage.key(i);if(!key?.startsWith(countPrefix))continue;
+        const id=key.slice(countPrefix.length);if(!validIndexId(id))continue;
+        const row=decodeRecord(localStorage.getItem(key));
+        if(row){rows.push({videoId:id,...row});keys.push(key);}
       }
     }catch(_){}
+    return {rows,keys};
+  }
+  function queueHistoryWrite(id,row){
+    pendingHistory.set(id,{videoId:id,...row});
+    if(historyFlushTimer!==null)return;
+    historyFlushTimer=setTimeout(()=>{historyFlushTimer=null;void flushHistoryWrites();},750);
+  }
+  async function flushHistoryWrites(){
+    if(historyFlushBusy||!historyReady||!pendingHistory.size)return;
+    historyFlushBusy=true;
+    const chunk=[...pendingHistory.values()].slice(0,300);
+    for(const v of chunk)pendingHistory.delete(v.videoId);
+    try{
+      const merged=await rpc('historyUpsert',{rows:chunk});
+      for(const v of merged){
+        const existing=historyIndex.get(v.videoId);
+        if(!existing||v.count>existing.count||(!existing.title&&v.title))setHistoryRow(v.videoId,{count:Math.max(v.count,existing?.count||0),title:existing?.title||v.title,updatedAt:Math.max(v.updatedAt,existing?.updatedAt||0)});
+      }
+    }catch(_){
+      for(const v of chunk)if(!pendingHistory.has(v.videoId))pendingHistory.set(v.videoId,v);
+    }finally{
+      historyFlushBusy=false;
+      if(pendingHistory.size&&historyFlushTimer===null)historyFlushTimer=setTimeout(()=>{historyFlushTimer=null;void flushHistoryWrites();},2000);
+    }
+  }
+  async function initializeHistory(){
+    try{
+      const initial=await rpc('historySnapshot');
+      for(const v of initial){
+        const existing=historyIndex.get(v.videoId);
+        if(!existing||v.count>existing.count||(!existing.title&&v.title))setHistoryRow(v.videoId,{count:Math.max(v.count,existing?.count||0),title:existing?.title||v.title,updatedAt:Math.max(v.updatedAt,existing?.updatedAt||0)});
+      }
+      const legacy=readLegacyHistory();
+      // Commit migration to extension storage before deleting any youtube.com legacy data.
+      for(let i=0;i<legacy.rows.length;i+=300){
+        const merged=await rpc('historyUpsert',{rows:legacy.rows.slice(i,i+300)});
+        for(const v of merged){
+          const existing=historyIndex.get(v.videoId);
+          if(!existing||v.count>existing.count||(!existing.title&&v.title))setHistoryRow(v.videoId,{count:Math.max(v.count,existing?.count||0),title:existing?.title||v.title,updatedAt:Math.max(v.updatedAt,existing?.updatedAt||0)});
+        }
+      }
+      for(const key of legacy.keys)try{localStorage.removeItem(key);}catch(_){}
+    }catch(_){
+      // A temporary extension-storage error must not prevent using the legacy cache.
+      const legacy=readLegacyHistory();
+      for(const v of legacy.rows){
+        const prior=historyIndex.get(v.videoId);
+        if(!prior||v.count>prior.count)setHistoryRow(v.videoId,{count:Math.max(v.count,prior?.count||0),title:prior?.title||v.title,updatedAt:Math.max(v.updatedAt,prior?.updatedAt||0)});
+      }
+    }finally{historyReady=true;onIndexChange();update();void flushHistoryWrites();}
   }
   function cachedCount(id){return historyIndex.get(id)?.count??null;}
   function storeRecord(id,count,title,changedAt,quiet=false){
     if(!validIndexId(id)||!Number.isSafeInteger(count)||count<0)return;
     const prior=historyIndex.get(id),next={count,title:cleanTitle(title,id)||prior?.title||'',updatedAt:changedAt??(prior?.count===count?prior.updatedAt:Date.now())};
     if(prior&&prior.count===next.count&&prior.title===next.title&&prior.updatedAt===next.updatedAt)return;
-    historyIndex.set(id,next);
-    try{localStorage.setItem(countPrefix+id,JSON.stringify(next));}catch(_){}
-    if(!quiet)onIndexChange();
+    setHistoryRow(id,next);
+    queueHistoryWrite(id,next);
+    // Updating a title has no effect on badge counts; avoid scanning all thumbnails.
+    if(!quiet){historyDirty=true;if(prior?.count!==next.count)queueBadgeScan(document);if(historyView&&!$('panel').hidden&&!historyUpdating)renderHistory();}
   }
   function cacheCount(s){
     if(!s.diskNames)return;
     s.diskCount=s.diskNames.size;
     storeRecord(s.id,s.diskCount,s.title);
-  }
-  function resetCountCache(){
-    try{for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);if(k?.startsWith(countPrefix))localStorage.removeItem(k);}}catch(_){}
-    historyIndex.clear();onIndexChange();
-    for(const s of sessions.values()){s.diskCount=null;s.diskNames=null;s.loaded=false;s.loadAttempted=false;}
   }
   function rememberCurrentTitle(){
     if(!current||current.id!==activeId())return;
@@ -754,7 +809,7 @@
     badgeTimer=null;const roots=[...badgeRoots];badgeRoots.clear();
     // Remove records whose cards were recycled or detached; avoid retaining DOM.
     for(const [anchor] of badgeRecords)if(!anchor.isConnected)removeBadge(anchor);
-    const hasRecords=[...historyIndex.values()].some(r=>r.count>0);
+    const hasRecords=positiveHistoryCount>0;
     if(!hasRecords){for(const [anchor] of badgeRecords)removeBadge(anchor);return;}
     const anchors=new Set();
     for(const root of roots){
@@ -766,7 +821,7 @@
     for(const anchor of anchors)paintBadge(anchor);
   }
   function queueBadgeScan(root){
-    const hasRecords=[...historyIndex.values()].some(r=>r.count>0);
+    const hasRecords=positiveHistoryCount>0;
     if(!hasRecords&&!badgeRecords.size)return;
     if(root===document||badgeRoots.size>=80){badgeRoots.clear();badgeRoots.add(document);}
     else if(!badgeRoots.has(document))badgeRoots.add(root);
@@ -779,7 +834,7 @@
     if(typeof MutationObserver==='function'){
       badgeObserver=new MutationObserver(records=>{
         // No work for unindexed users. Ignore our own overlay mutations.
-        if(!badgeRecords.size&&![...historyIndex.values()].some(r=>r.count>0))return;
+        if(!badgeRecords.size&&positiveHistoryCount===0)return;
         for(const m of records){
           if(m.type==='attributes'){if(m.target.matches?.('a[href]')||badgeRecords.has(m.target))queueBadgeScan(m.target);continue;}
           for(const node of m.addedNodes){if(node.nodeType===1&&!node.classList?.contains(badgeClass)&&node.id!=='dg-slides-host')queueBadgeScan(node);}
@@ -788,14 +843,22 @@
       });
       badgeObserver.observe(document.body||document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['href']});
     }
-    window.addEventListener('storage',e=>{
-      if(e.key===null){historyIndex.clear();readHistoryIndex();onIndexChange();return;}
-      if(!e.key.startsWith(countPrefix))return;
-      const id=e.key.slice(countPrefix.length);if(!validIndexId(id))return;
-      const r=decodeRecord(e.newValue);
-      if(r)historyIndex.set(id,r);else historyIndex.delete(id);
-      const session=sessions.get(id);if(session&&!session.loaded)session.diskCount=r?.count??null;
-      onIndexChange();update();
+    chrome.storage.onChanged.addListener((changes,area)=>{
+      if(area!=='local')return;
+      let countsChanged=false,changed=false;
+      for(const [key,value] of Object.entries(changes)){
+        if(!key.startsWith('dg-slides-history-v2:'))continue;
+        const id=key.slice('dg-slides-history-v2:'.length);
+        if(!validIndexId(id))continue;
+        const v=value.newValue,previous=historyIndex.get(id);
+        const count=Number.isSafeInteger(v?.count)&&v.count>=0?v.count:null;
+        if(count===null)continue;
+        const next={count:Math.max(count,previous?.count||0),title:previous?.title||cleanTitle(v.title,id),updatedAt:Math.max(previous?.updatedAt||0,v.updatedAt||0)};
+        if(previous&&JSON.stringify(previous)===JSON.stringify(next))continue;
+        if(previous?.count!==next.count)countsChanged=true;
+        setHistoryRow(id,next);changed=true;
+      }
+      if(changed){historyDirty=true;if(countsChanged)queueBadgeScan(document);if(historyView&&!$('panel').hidden&&!historyUpdating)renderHistory();update();}
     });
     queueBadgeScan(document);
   }
@@ -819,5 +882,5 @@
       const now=performance.now();if(now-lastTick>=Number($('interval').value)*1000){lastTick=now;void sample();}
     },250);
   }
-  wireCropEditor();readHistoryIndex();installBadgeLayer();setInterval(()=>{repairRoute();void pollCloudStatus();},3000);route();update();void initFolder();setTimeout(()=>{void quickHistorySync();},1400);
+  wireCropEditor();installBadgeLayer();void initializeHistory();setInterval(()=>{repairRoute();void pollCloudStatus();},3000);route();update();void initFolder();setTimeout(()=>{void quickHistorySync();},1400);
 })();
