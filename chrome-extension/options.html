@@ -19,6 +19,14 @@
 <label class="choice"><input type="radio" name="mode" value="existing"><span><strong>沿用既有 YouTube Slides 資料夾</strong><span class="muted">可讀取原有圖片；Google 會要求完整 Drive 存取權限。</span></span></label>
 <div id="existingFields" hidden><label for="folder">既有資料夾網址或 ID</label><input class="field" id="folder" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off"><label class="row"><input type="checkbox" id="confirm"> 我了解完整 Drive 權限，並確認資料夾。</label></div>
 <p><button class="primary full" id="login" disabled>使用 Google 帳號登入</button></p><p class="muted">同一安裝只綁定一個帳號及資料夾。套件不提供雲端刪除功能。</p></section>
+<section class="card" id="namingCard" hidden>
+<h2>影片資料夾命名</h2>
+<p class="muted">新影片資料夾僅顯示標題，YouTube 影片 ID 存在 Google Drive 應用程式專用中繼資料。既有的 ID 資料夾不會自動變動。</p>
+<div class="row"><button id="previewNames">檢查舊資料夾</button><button id="migrateNames" disabled>重新命名選定資料夾</button></div>
+<div class="message" id="namingStatus" role="status"></div>
+<div id="namingList" style="display:grid;gap:10px;margin:12px 0"></div>
+<small>改名只更新資料夾名稱與隱藏 ID，不移動或刪除圖片。若舊圖片尚未建立影片標題索引，可先手動填寫標題。請先完成待上傳圖片的同步，再執行改名。</small>
+</section>
 <section class="card"><h2>套件更新</h2><p class="muted">未封裝版本需手動下載更新。檢查時只讀取 GitHub 公開版本資訊，不傳送 Google 憑證或圖片。</p><div class="row"><button id="checkUpdate">檢查更新</button><a class="button" href="https://github.com/kevinsmemo/tampermonkey-scripts/archive/refs/heads/chrome-extension-alpha.zip" target="_blank" rel="noopener noreferrer">下載最新 ZIP ↗</a></div><div id="updateResult" class="message" role="status"></div><div class="divider"></div><small>解壓縮後將 chrome-extension 內的檔案覆蓋原本載入的資料夾，再到 chrome://extensions 重新載入。不要移除套件，以免離線圖片遺失。</small></section>
 <footer>本機擷取優先 · 原圖保留 · 雲端同步需要網路與有效授權</footer>
 </main><script src="options.js"></script></body></html>
