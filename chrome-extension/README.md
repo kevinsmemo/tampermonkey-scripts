@@ -1,4 +1,4 @@
-# YouTube Slides Extractor — Chrome Extension v0.3.3 (Cloud Alpha)
+# YouTube Slides Extractor — Chrome Extension v0.3.4 (Cloud Alpha)
 
 ## 安裝與連接
 
@@ -9,6 +9,14 @@
 5. 授權後重整 YouTube，點歷史紀錄的「更新索引」。
 
 固定擴充套件 ID：kbghnfojpidgmkfmjnajikpnhgcpphan
+
+## v0.3.4
+- 新增雲端資料夾純標題命名：上傳新影片時，資料夾名稱使用清理後的影片標題，YouTube ID 寫入私有 Google Drive appProperties.youtubeVideoId，不出現在名稱中。
+- 雲端讀取、索引、下載與繼續上傳會同時識別舊式影片 ID 資料夾及帶私有 ID 的標題資料夾；既有影片會沿用舊資料夾，避免重複建檔。
+- 同標題資料夾會依序加上 (2)、(3) 等可讀尾碼，不顯示影片 ID。檔名最長 108 個 Unicode 字元並移除跨平台不適用字元。影片後續改標題不會反覆更名。
+- 在設定頁可預覽舊資料夾，再選擇手動整理：逐一在同一資料夾 ID 上寫入私有 appProperties 並改為標題，不移動、不刪除 PNG，原有雲端圖片 ID 不變。
+- 若舊影片缺乏可用標題索引，可手動輸入標題。整理前必須確定本機待同步圖片數量為零。舊版擴充套件不支援新命名方式，因此建議先驗證新版再整理舊資料夾。
+- 已有資料夾不會因安裝新版而自動更名。全部圖片與 IndexedDB 均維持原狀。
 
 ## v0.3.3
 - 成功寫入擴充套件 IndexedDB 後，立即排入 Google Drive 上傳（不必等下次一分鐘排程）。即時上傳合併請求，每次最多處理三批、每批最多五張；如有剩餘則由既有每分鐘排程繼續補傳。
