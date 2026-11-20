@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Slides Extractor (Cloud Alpha)",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Capture YouTube slides with a durable local queue and direct Google Drive sync.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxwHIpycbrdo1Mq5LQQJeOVc6b1zpl688OXgm1jmKOS1IyqkWH1jG0mMpzl/rTkRJCilqAH7aUkjUrwdfDlCjP/5cvvo90JVxfsYjEDnHfEWF8z80uw521Vmm1OH3TPervACPCV5Sx/+4ZmXWnVP4ytszNM9XSmtqo419wywR3Y+hTVZ/i1NNxvqGa1yC3F2nmvI5lBnnRV9njHi2SKRhjxl8SRar5mHOdmXZkBfvq7iYw4YjFU6KW5z80/FZt9qI1r4oQC017PSgFp7vbkF1TN3OfCM2Xpgqi0aepo4WI0FM6wVhAcfZYJpgM+eSCKCE/tGXb7IcRblB6mpO+uENpQIDAQAB",
   "permissions": [
