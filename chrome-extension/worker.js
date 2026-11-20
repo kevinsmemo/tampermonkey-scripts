@@ -202,6 +202,7 @@ async function summarizeIndex(snapshot){
  return [...rows.values()];
 }
 async function scanRootIndex(t,c){
+ const prior=await loadRootIndex(t,c).catch(()=>null),priorTitles=new Map((prior?.videos||[]).map(v=>[v.videoId,v.title]));
  const roots=[c.root],legacy=await folder(t,c.root,'slides-v1');if(legacy)roots.push(legacy);
  const map=new Map(),now=Date.now();
  for(const root of roots){
@@ -219,7 +220,7 @@ async function scanRootIndex(t,c){
   }
  }
  const locals=new Map((await localIndexRows()).map(r=>[r.videoId,r]));
- return {schema_version:1,root_id:c.root,generated_at:now,videos:[...map.values()].map(({names,...v})=>({...v,title:locals.get(v.videoId)?.title||v.title,count:names.size,updatedAt:v.updatedAt||now}))};
+ return {schema_version:1,root_id:c.root,generated_at:now,videos:[...map.values()].map(({names,...v})=>({...v,title:locals.get(v.videoId)?.title||v.title||priorTitles.get(v.videoId)||'',count:names.size,updatedAt:v.updatedAt||now}))};
 }
 async function cloudIndex(forceScan=false,quick=false){
  const c=await config();if(!c)return {rows:await localIndexRows(),warning:'尚未連接 Google Drive',source:'local',state:await state()};
