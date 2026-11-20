@@ -1,4 +1,4 @@
-# YouTube Slides Extractor — Chrome Extension v0.3.4 (Cloud Alpha)
+# YouTube Slides Extractor — Chrome Extension v0.3.5 (Cloud Alpha)
 
 ## 安裝與連接
 
@@ -9,6 +9,15 @@
 5. 授權後重整 YouTube，點歷史紀錄的「更新索引」。
 
 固定擴充套件 ID：kbghnfojpidgmkfmjnajikpnhgcpphan
+
+## v0.3.5
+- 新增 `YouTube Slides/index.json`：只儲存每部影片 ID、標題、資料夾 ID、投影片張數、更新時間；不儲存 PNG 或縮圖。
+- 新增同步產生的 `INDEX.md`：可直接在 Google Drive 瀏覽影片名稱、截圖張數及資料夾超連結。
+- YouTube 頁面先以既有 localStorage 即時標記縮圖，再以背景小型索引更新跨裝置資料；每個 Chrome 設定檔的雲端讀取最多每 15 分鐘一次，非同步且不下載圖片。
+- 歷史紀錄「更新索引」優先讀取單一 `index.json`。第一次沒有索引時進行完整掃描並建立索引；另增「完整修復」按鈕，遇到舊圖/手動變動可重新掃描雲端 PNG 檔名，重建兩份索引。
+- PNG 上傳仍即時，成功上傳後約 2 分鐘合併更新兩份索引，以降低 API 呼叫及寫入頻率；失敗保留髒資料標記並重試，不影響原圖同步。
+- 保留 IndexedDB 原圖、本機快取、按影片 Lazy Load、影片隱藏 ID、舊格式相容、既有 OAuth 授權及固定套件 ID。
+- 雲端索引為可修復的快取快照；多裝置同時寫入或手動刪圖後，可能暫時不一致，使用「完整修復」以雲端圖片為準。未經實際 Chrome 測試前不建議移除舊版資料。
 
 ## v0.3.4
 - 新增雲端資料夾純標題命名：上傳新影片時，資料夾名稱使用清理後的影片標題，YouTube ID 寫入私有 Google Drive appProperties.youtubeVideoId，不出現在名稱中。
