@@ -4,7 +4,7 @@ const API='https://www.googleapis.com/drive/v3',UPLOAD='https://www.googleapis.c
 const FOLDER='application/vnd.google-apps.folder',LIMIT=24*1024*1024,FILE_SCOPE='https://www.googleapis.com/auth/drive.file',ALL_SCOPE='https://www.googleapis.com/auth/drive';
 const ID=/^[A-Za-z0-9_-]{11}$/,NAME=/^slide_\d{13}_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(direct|tab)_(quick|normal)\.png$/;
 const key=(vid,name)=>vid+'/'+name;
-const VIDEO_KEY='youtubeVideoId',INDEX_NAME='index.json',INDEX_MD='INDEX.md',INDEX_MAX=3*1024*1024,INDEX_INTERVAL=15*60*1000;
+const VIDEO_KEY='youtubeVideoId',INDEX_NAME='index.json',INDEX_MD='INDEX.md',INDEX_MAX=3*1024*1024,INDEX_INTERVAL=15*60*1000,INDEX_IDLE=5*60*1000,INDEX_MAX_WAIT=30*60*1000,INDEX_RETRY=5*60*1000;
 let dbPromise,serial=Promise.resolve(),writeSerial=Promise.resolve();
 function queueWrite(fn){const p=writeSerial.then(fn);writeSerial=p.catch(()=>{});return p;}
 function queue(fn){const p=serial.then(fn);serial=p.catch(()=>{});return p;}
@@ -241,48 +241,79 @@ async function cloudIndex(forceScan=false,quick=false){
  }catch(e){warning='雲端索引暫不可用，保留本機資料：'+String(e?.message||e).slice(0,160);}
  return {rows:await summarizeIndex(snapshot),source,generatedAt:snapshot?.generated_at||0,warning,state:await state()};
 }
-async function markIndexDirty(ids){
- const stored=await chrome.storage.local.get('indexDirtyIds');
- const all=new Set(Array.isArray(stored.indexDirtyIds)?stored.indexDirtyIds:[]);
- for(const id of ids)if(ID.test(id))all.add(id);
- await chrome.storage.local.set({indexDirtyIds:[...all]});
- await chrome.alarms.create('slides-index',{delayInMinutes:2});
+// Keep the dirty ledger in durable Chrome storage. Timers are reconstructed after restarts.
+function dirtyIndexState(stored,now=Date.now()){
+ const ids=[...new Set((Array.isArray(stored?.indexDirtyIds)?stored.indexDirtyIds:[]).filter(v=>ID.test(v)))];
+ const firstAt=Number.isFinite(stored?.indexDirtyFirstAt)&&stored.indexDirtyFirstAt>0?Math.min(stored.indexDirtyFirstAt,now):now;
+ const lastAt=Number.isFinite(stored?.indexDirtyLastAt)&&stored.indexDirtyLastAt>0?Math.min(stored.indexDirtyLastAt,now):now;
+ const retryAt=Number.isFinite(stored?.indexRetryAt)&&stored.indexRetryAt>0?stored.indexRetryAt:0;
+ return {ids,firstAt,lastAt,retryAt};
+}
+function indexDueAt(d){
+ return Math.max(Math.min(d.lastAt+INDEX_IDLE,d.firstAt+INDEX_MAX_WAIT),d.retryAt||0);
+}
+async function armDirtyIndex(d){
+ if(!d.ids.length){await chrome.alarms.clear('slides-index');return;}
+ // Chrome alarm scheduling is best effort; never rely on an unload handler.
+ await chrome.alarms.create('slides-index',{when:Math.max(Date.now()+30000,indexDueAt(d))});
+}
+async function markIndexDirty(ids,activity=true){
+ const old=dirtyIndexState(await chrome.storage.local.get(['indexDirtyIds','indexDirtyFirstAt','indexDirtyLastAt','indexRetryAt']));
+ const added=[...new Set(ids)].filter(v=>ID.test(v));
+ if(!added.length&&!old.ids.length)return;
+ const now=Date.now(),all=[...new Set([...old.ids,...added])];
+ const firstAt=old.ids.length?old.firstAt:now;
+ const lastAt=activity?now:(old.ids.length?old.lastAt:now);
+ const next={ids:all,firstAt,lastAt,retryAt:old.retryAt};
+ await chrome.storage.local.set({indexDirtyIds:all,indexDirtyFirstAt:firstAt,indexDirtyLastAt:lastAt,indexRetryAt:old.retryAt});
+ await armDirtyIndex(next);
 }
 async function syncCloudIndex(){
- const stored=await chrome.storage.local.get('indexDirtyIds');
- const ids=(Array.isArray(stored.indexDirtyIds)?stored.indexDirtyIds:[]).filter(v=>ID.test(v));
- if(!ids.length)return;
+ const stored=await chrome.storage.local.get(['indexDirtyIds','indexDirtyFirstAt','indexDirtyLastAt','indexRetryAt']);
+ const current=dirtyIndexState(stored),ids=current.ids;
+ if(!ids.length){await chrome.alarms.clear('slides-index');return;}
+ if(Date.now()+1000<indexDueAt(current)){await armDirtyIndex(current);return;}
  try{
-  const c=await config();if(!c)return;
-  const t=await auth(c);await checkRoot(t,c);
-  // An absent index is built once. Existing indexes are merged with local uploaded records.
-  let snapshot=await loadRootIndex(t,c);
-  if(!snapshot)snapshot=await scanRootIndex(t,c);
-  else{
-   const map=new Map(snapshot.videos.map(v=>[v.videoId,v]));
-   for(const vid of ids){
-    const rows=await records('videoId',vid),old=map.get(vid);
-    const folders=await allVideoFolders(t,c,vid);
-    if(!folders.length)throw Error('索引更新時找不到影片資料夾：'+vid);
-    // Count only filenames for the touched video, preventing lost increments across devices.
-    const names=new Map();
-    for(const f of folders)for(const item of await children(t,f.id)){
-     if(!NAME.test(item.name)||item.mimeType!=='image/png')continue;
-     if(names.has(item.name)&&names.get(item.name)!==item.id)throw Error('影片資料夾內發現重複檔名，已停止更新索引');
-     names.set(item.name,item.id);
-    }
-    const title=rows.find(r=>r.title&&r.title!==vid)?.title||old?.title||(!ID.test(folders[0].name)?folders[0].name:'');
-    map.set(vid,{videoId:vid,title,count:names.size,folderId:folders[0].id,updatedAt:Date.now()});
+   const c=await config();if(!c){await armDirtyIndex({...current,retryAt:Date.now()+INDEX_RETRY});return;}
+   const t=await auth(c);await checkRoot(t,c);
+   let snapshot=await loadRootIndex(t,c);
+   if(!snapshot)snapshot=await scanRootIndex(t,c);
+   else{
+     const map=new Map(snapshot.videos.map(v=>[v.videoId,v]));
+     for(const vid of ids){
+       const rows=await records('videoId',vid),old=map.get(vid);
+       const folders=await allVideoFolders(t,c,vid);
+       if(!folders.length)throw Error('索引更新時找不到影片資料夾：'+vid);
+       const names=new Map();
+       for(const f of folders)for(const item of await children(t,f.id)){
+         if(!NAME.test(item.name)||item.mimeType!=='image/png')continue;
+         if(names.has(item.name)&&names.get(item.name)!==item.id)throw Error('影片資料夾內發現重複檔名，已停止更新索引');
+         names.set(item.name,item.id);
+       }
+       const title=rows.find(r=>r.title&&r.title!==vid)?.title||old?.title||(!ID.test(folders[0].name)?folders[0].name:'');
+       map.set(vid,{videoId:vid,title,count:names.size,folderId:folders[0].id,updatedAt:Date.now()});
+     }
+     snapshot.videos=[...map.values()];
    }
-   snapshot.videos=[...map.values()];
-  }
-  await saveRootIndex(t,c,snapshot);
-  // Only clear the dirty set after both JSON and Markdown are successfully uploaded.
-  await chrome.storage.local.remove('indexDirtyIds');
-  await updateHealth({indexError:''});
+   await saveRootIndex(t,c,snapshot);
+   // The index is a snapshot of uploaded PNGs. Retain dirty video IDs with in-flight local PNGs.
+   const pendingVideos=new Set((await records('state','pending')).map(r=>r.videoId));
+   const remaining=ids.filter(vid=>pendingVideos.has(vid));
+   if(remaining.length){
+     const now=Date.now();
+     const next={ids:remaining,firstAt:now,lastAt:now,retryAt:0};
+     await chrome.storage.local.set({indexDirtyIds:remaining,indexDirtyFirstAt:now,indexDirtyLastAt:now,indexRetryAt:0});
+     await armDirtyIndex(next);
+   }else{
+     await chrome.storage.local.remove(['indexDirtyIds','indexDirtyFirstAt','indexDirtyLastAt','indexRetryAt']);
+     await chrome.alarms.clear('slides-index');
+   }
+   await updateHealth({indexError:''});
  }catch(e){
-  await updateHealth({indexError:String(e?.message||e).slice(0,200)});
-  await chrome.alarms.create('slides-index',{delayInMinutes:5});
+   const retryAt=Date.now()+INDEX_RETRY;
+   await updateHealth({indexError:String(e?.message||e).slice(0,200)});
+   await chrome.storage.local.set({indexRetryAt:retryAt});
+   await armDirtyIndex({...current,retryAt});
  }
 }
 async function catalog(vid){
@@ -329,6 +360,8 @@ async function flush(checkWhenEmpty=false){
  try{
   const t=await auth(c);await checkRoot(t,c);verified=true;
   await updateHealth({lastCheckedAt:Date.now(),checkError:''});
+  // Mark the batch durably BEFORE calling Drive, closing the crash window between upload and index scheduling.
+  await markIndexDirty(new Set(pending.slice(0,5).map(r=>r.videoId)),false);
   for(const r of pending.slice(0,5)){await uploadOne(t,c,r);uploaded++;uploadedIds.add(r.videoId);}
   await updateHealth({syncError:'',...(uploaded?{lastUploadedAt:Date.now(),lastUploadCount:uploaded}:{})});
   await chrome.storage.local.set({lastSync:'同步批次完成 '+new Date().toLocaleString()});
@@ -356,7 +389,16 @@ function requestImmediateSync(){
  }).catch(()=>{immediateSyncQueued=false;});
 }
 chrome.alarms.onAlarm.addListener(a=>{if(a.name==='slides-sync')void queue(flush).catch(()=>{});if(a.name==='slides-index')void queue(syncCloudIndex).catch(()=>{});});
-const resumePending=()=>void queue(async()=>{if(await pendingCount())await arm();const d=await chrome.storage.local.get('indexDirtyIds');if(d.indexDirtyIds?.length)await chrome.alarms.create('slides-index',{delayInMinutes:1});}).catch(()=>{});
+const resumePending=()=>void queue(async()=>{
+ const pending=await records('state','pending');
+ if(pending.length){
+   await arm();
+   // A previous process may have stopped after persisting a PNG or after a Drive upload.
+   await markIndexDirty(new Set(pending.map(r=>r.videoId)),false);
+ }
+ const dirty=dirtyIndexState(await chrome.storage.local.get(['indexDirtyIds','indexDirtyFirstAt','indexDirtyLastAt','indexRetryAt']));
+ await armDirtyIndex(dirty);
+}).catch(()=>{});
 chrome.runtime.onStartup.addListener(resumePending);
 chrome.runtime.onInstalled.addListener(resumePending);
 chrome.action.onClicked.addListener(()=>void chrome.runtime.openOptionsPage());
