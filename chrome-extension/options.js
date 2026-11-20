@@ -21,7 +21,7 @@ function draw(s){
  $('connectionLabel').textContent=label;$('connectionBadge').dataset.tone=tone;
  $('pending').textContent=String(s.pending??0);$('uploadedAt').textContent=s.lastUploadedAt?formatTime(s.lastUploadedAt)+' · '+(s.lastUploadCount||1)+' 張':'尚無新版紀錄';
  $('checkedAt').textContent=s.lastCheckedAt?'最近檢查：'+formatTime(s.lastCheckedAt):'尚未檢查連線';
- $('folderSummary').hidden=!s.connected;$('loginCard').hidden=s.connected;$('reauth').hidden=!s.connected;
+ $('folderSummary').hidden=!s.connected;$('loginCard').hidden=s.connected;$('reauth').hidden=!s.connected;$('namingCard').hidden=!s.connected;
  $('folderName').textContent=s.rootName||'YouTube Slides';
  $('modeLabel').textContent=s.mode==='existing'?'既有資料夾 · 完整 Drive 授權':'專用資料夾 · 最小權限';
  if(/^[A-Za-z0-9_-]{10,150}$/.test(s.root||'')){$('folderLink').href='https://drive.google.com/drive/folders/'+s.root;$('folderLink').hidden=false;}else{$('folderLink').removeAttribute('href');$('folderLink').hidden=true;}
@@ -41,6 +41,47 @@ $('login').onclick=()=>{const m=mode();if(m==='existing'&&(!$('confirm').checked
 $('reauth').onclick=()=>{if(snapshot?.connected)void run('connect',{mode:snapshot.mode});};
 $('sync').onclick=()=>void run('syncNow');
 $('verify').onclick=()=>void run('verify');
+let namingPreview=null,namingWorking=false;
+function namingButtons(){
+ $('previewNames').disabled=namingWorking||!snapshot?.connected;
+ const hasRows=namingPreview?.folders?.length>0;
+ $('migrateNames').disabled=namingWorking||!snapshot?.connected||!!snapshot?.pending||!hasRows;
+}
+function renderNaming(data){
+ namingPreview=data;const target=$('namingList');target.replaceChildren();
+ const count=data.folders.length;
+ $('namingStatus').textContent=count?('找到 '+count+' 個舊資料夾；可直接改名 '+data.ready+' 個。缺少標題的可以在下方填入名稱。'):'沒有需要更名的舊資料夾。';
+ for(const item of data.folders){
+  const label=document.createElement('label');label.className='field';label.style.margin='0';
+  const caption=document.createElement('small');caption.textContent='原資料夾：'+item.videoId;
+  const input=document.createElement('input');input.className='field';input.style.margin='5px 0 0';input.maxLength=350;
+  input.placeholder='輸入影片標題';input.value=item.title||'';input.dataset.videoId=item.videoId;
+  label.append(caption,input);target.append(label);
+ }
+ namingButtons();
+}
+$('previewNames').onclick=async()=>{
+ if(namingWorking)return;namingWorking=true;namingButtons();message($('namingStatus'),'讀取雲端資料夾索引…');
+ try{const data=await rpc('previewNames');renderNaming(data);}
+ catch(e){message($('namingStatus'),'檢查失敗：'+e.message,true);}
+ finally{namingWorking=false;namingButtons();}
+};
+$('migrateNames').onclick=async()=>{
+ if(namingWorking||!namingPreview||snapshot?.pending)return;
+ const titles={};let selected=0;
+ for(const input of $('namingList').querySelectorAll('input[data-video-id]')){
+  if(input.value.trim()){titles[input.dataset.videoId]=input.value.trim();selected++;}
+ }
+ if(!selected){message($('namingStatus'),'請先填入至少一部影片的標題。',true);return;}
+ if(!confirm('確定重新命名 '+selected+' 個候選資料夾？此操作不會移動或刪除圖片，但舊版擴充套件可能無法辨識新資料夾。'))return;
+ namingWorking=true;namingButtons();message($('namingStatus'),'正在逐一重新命名…');
+ try{
+  const result=await rpc('migrateNames',{titles});
+  const data=await rpc('previewNames');renderNaming(data);
+  message($('namingStatus'),'已重新命名 '+result.renamed+' 個資料夾；另有 '+result.skipped+' 個尚未處理。');
+ }catch(e){message($('namingStatus'),'整理中斷：'+e.message+'。可重新檢查確認剩餘資料夾。',true);}
+ finally{namingWorking=false;namingButtons();await display();}
+};
 function compareVersion(a,b){if(!/^\d+(?:\.\d+){1,3}$/.test(a)||!/^\d+(?:\.\d+){1,3}$/.test(b))throw Error('無法辨識版本格式');const aa=a.split('.').map(Number),bb=b.split('.').map(Number);for(let i=0;i<Math.max(aa.length,bb.length);i++){const n=(aa[i]||0)-(bb[i]||0);if(n)return Math.sign(n);}return 0;}
 $('checkUpdate').onclick=async()=>{
  if(updateBusy)return;updateBusy=true;$('checkUpdate').disabled=true;message($('updateResult'),'正在檢查版本…');
@@ -54,6 +95,6 @@ $('checkUpdate').onclick=async()=>{
  }catch(e){message($('updateResult'),'檢查失敗：'+e.message,true);}
  finally{updateBusy=false;$('checkUpdate').disabled=false;}
 };
-updateFields();void display();
+updateFields();void display();namingButtons();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)void display();});
 setInterval(()=>{if(!document.hidden)void display();},5000);
