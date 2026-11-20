@@ -4,6 +4,9 @@ const API='https://www.googleapis.com/drive/v3',UPLOAD='https://www.googleapis.c
 const FOLDER='application/vnd.google-apps.folder',LIMIT=24*1024*1024,FILE_SCOPE='https://www.googleapis.com/auth/drive.file',ALL_SCOPE='https://www.googleapis.com/auth/drive';
 const ID=/^[A-Za-z0-9_-]{11}$/,NAME=/^slide_\d{13}_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(direct|tab)_(quick|normal)\.png$/;
 const key=(vid,name)=>vid+'/'+name;
+const HISTORY_PREFIX='dg-slides-history-v2:',HISTORY_LIST_KEY='dg-slides-history-ids-v2';
+const VIDEO_DIR_TTL=5*60*1000;
+const videoDirCache=new Map();
 const VIDEO_KEY='youtubeVideoId',INDEX_NAME='index.json',INDEX_MD='INDEX.md',INDEX_MAX=3*1024*1024,INDEX_INTERVAL=15*60*1000,INDEX_IDLE=5*60*1000,INDEX_MAX_WAIT=30*60*1000,INDEX_RETRY=5*60*1000;
 let dbPromise,serial=Promise.resolve(),writeSerial=Promise.resolve();
 function queueWrite(fn){const p=writeSerial.then(fn);writeSerial=p.catch(()=>{});return p;}
@@ -16,6 +19,44 @@ function saveRecord(r,blob){return tx(['meta','bytes'],'readwrite',(t,done)=>{t.
 async function config(){return (await chrome.storage.local.get('config')).config||null;}
 let syncRunning=false,immediateSyncQueued=false,automaticRetryAfter=0;
 function pendingCount(){return tx(['meta'],'readonly',(t,done)=>{const r=t.objectStore('meta').index('state').count('pending');r.onsuccess=()=>done(r.result);});}
+// Isolated extension storage replaces the previous youtube.com localStorage index.
+function normalizeHistoryRow(v){
+ if(!ID.test(v?.videoId||'')||!Number.isSafeInteger(v.count)||v.count<0||v.count>1000000)throw Error('Invalid history row');
+ return {videoId:v.videoId,count:v.count,title:typeof v.title==='string'?v.title.slice(0,350):'',updatedAt:Number.isFinite(v.updatedAt)&&v.updatedAt>0?Math.min(v.updatedAt,Date.now()+60000):0};
+}
+function historyStorageKey(id){return HISTORY_PREFIX+id;}
+async function historySnapshot(){
+ // Read only the history keyset; do not deserialize unrelated cloud index/health data.
+ const manifest=await chrome.storage.local.get(HISTORY_LIST_KEY);
+ const ids=Array.isArray(manifest[HISTORY_LIST_KEY])?manifest[HISTORY_LIST_KEY].filter(v=>ID.test(v)):null;
+ const all=ids?await chrome.storage.local.get(ids.map(historyStorageKey)):await chrome.storage.local.get(null);
+ const rows=[];
+ for(const [key,value] of Object.entries(all)){
+  if(!key.startsWith(HISTORY_PREFIX))continue;
+  try{const id=key.slice(HISTORY_PREFIX.length),r=normalizeHistoryRow({...value,videoId:id});rows.push(r);}catch(_){}
+ }
+ return rows;
+}
+async function historyUpsert(rows){
+ if(!Array.isArray(rows)||rows.length>500)throw Error('Too many history rows');
+ const requested=rows.map(normalizeHistoryRow),keys=requested.map(r=>historyStorageKey(r.videoId));
+ const previous=await chrome.storage.local.get([...keys,HISTORY_LIST_KEY]),updates={},merged=[];
+ const storedIds=Array.isArray(previous[HISTORY_LIST_KEY])?previous[HISTORY_LIST_KEY].filter(v=>ID.test(v)):[];
+ const allIds=new Set(storedIds);
+ for(const r of requested){
+  const key=historyStorageKey(r.videoId),prior=previous[key];
+  allIds.add(r.videoId);
+  const same=prior&&Number.isSafeInteger(prior.count)&&prior.count>=0?prior:null;
+  const title=r.title||(same?.title||'');
+  const result={count:Math.max(r.count,same?.count||0),title,updatedAt:Math.max(r.updatedAt,same?.updatedAt||0)};
+  if(!same||JSON.stringify(result)!==JSON.stringify(same))updates[key]=result;
+  merged.push({videoId:r.videoId,...result});
+  previous[key]=result;
+ }
+ if(!Array.isArray(previous[HISTORY_LIST_KEY])||allIds.size!==storedIds.length)updates[HISTORY_LIST_KEY]=[...allIds];
+ if(Object.keys(updates).length)await chrome.storage.local.set(updates);
+ return merged;
+}
 async function updateHealth(patch){const old=(await chrome.storage.local.get('syncHealth')).syncHealth||{};await chrome.storage.local.set({syncHealth:{...old,...patch}});}
 async function state(){
  const c=await config(),pending=await pendingCount(),data=await chrome.storage.local.get(['lastSync','syncHealth']),health=data.syncHealth||{};
@@ -75,11 +116,17 @@ async function chooseDisplayName(t,parent,title,vid,excluding=null){
  throw Error('影片標題重複過多，已停止建立資料夾');
 }
 async function ensureVideoDir(t,c,vid,title){
+ const cached=videoDirCache.get(vid);
+ if(cached?.root===c.root&&cached.expires>Date.now())return cached.id;
  const found=await allVideoFolders(t,c,vid);
- if(found.length)return found[0].id;
+ if(found.length){
+  videoDirCache.set(vid,{id:found[0].id,root:c.root,expires:Date.now()+VIDEO_DIR_TTL});
+  return found[0].id;
+ }
  const name=await chooseDisplayName(t,c.root,title,vid);
  const file=await json(t,'/files?fields=id,name,appProperties',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,mimeType:FOLDER,parents:[c.root],appProperties:{[VIDEO_KEY]:vid}})});
  if(!file.id||file.name!==name||file.appProperties?.[VIDEO_KEY]!==vid)throw Error('建立資料夾後無法驗證影片 ID，請重新同步');
+ videoDirCache.set(vid,{id:file.id,root:c.root,expires:Date.now()+VIDEO_DIR_TTL});
  return file.id;
 }
 async function legacyCandidates(t,c){
@@ -420,6 +467,9 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  case 'get':data=await queue(()=>get(m));break;
  case 'index':data=await queue(index);break;
  case 'indexQuick':data=await queue(indexQuick);break;
+ case 'historySnapshot':data=await historySnapshot();break;
+ case 'historyUpsert':data=await queueWrite(()=>historyUpsert(m.rows));break;
+
  case 'rebuildIndex':data=await queue(rebuildIndex);break;
  case 'sync':data=await queue(flush);break;
  case 'syncNow':data=await queue(()=>flush(true));break;
