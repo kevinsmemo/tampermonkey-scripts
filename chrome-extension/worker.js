@@ -85,11 +85,29 @@ async function folder(t,parent,name,create=false){const matches=await children(t
 async function checkRoot(t,c){const f=await json(t,'/files/'+encodeURIComponent(c.root)+'?fields=id,name,mimeType,trashed');if(f.trashed||f.mimeType!==FOLDER||f.name!==c.rootName)throw Error('指定資料夾名稱已變更或不存在，停止同步');}
 // Human-readable folders use private Drive metadata as their stable identity.
 function cleanVideoTitle(title,vid){
- let name=String(title||'').replace(/\s*-\s*YouTube\s*$/i,'').replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g,' ').replace(/\s+/g,' ').replace(/^[.\s]+|[.\s]+$/g,'').trim();
+ // Preserve meaningful punctuation, while making file names safe for Windows/macOS sync.
+ let name=String(title||'').normalize('NFC').replace(/\s*-\s*YouTube\s*$/i,'');
+ name=name.replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g,' ');
+ name=name.replace(/^(\d{4})\s*[\/.\-]\s*(\d{1,2})\s*[\/.\-]\s*(\d{1,2})\s*[(（]([一二三四五六日天])[)）]/,(_,y,m,d,week)=>
+  `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}（${week}） `);
+ name=name.replace(/[\\/]/g,'／').replace(/:/g,'：').replace(/\?/g,'？').replace(/\*/g,'＊')
+  .replace(/"/g,'＂').replace(/</g,'〈').replace(/>/g,'〉').replace(/\|/g,'｜')
+  .replace(/〖/g,'【').replace(/〗/g,'】').replace(/\s+/g,' ').trim().replace(/^[.\s]+|[.\s]+$/g,'');
+ if(/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(name))name='_'+name;
  name=Array.from(name).slice(0,108).join('').replace(/[.\s]+$/g,'');
  return name||vid;
 }
 function folderIdFor(r){const v=r?.appProperties?.[VIDEO_KEY];return ID.test(v||'')?v:ID.test(r?.name||'')?r.name:null;}
+async function ensureFolderTag(t,dir,vid){
+ if(dir.appProperties?.[VIDEO_KEY]===vid)return dir;
+ if(dir.appProperties?.[VIDEO_KEY])throw Error('資料夾影片 ID 與索引衝突：'+dir.id);
+ const patched=await json(t,'/files/'+encodeURIComponent(dir.id)+'?fields=id,name,mimeType,parents,trashed,appProperties',{
+  method:'PATCH',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({appProperties:{...(dir.appProperties||{}),[VIDEO_KEY]:vid}})
+ });
+ if(patched.id!==dir.id||patched.appProperties?.[VIDEO_KEY]!==vid)throw Error('無法寫入隱藏影片 ID：'+dir.id);
+ return patched;
+}
 async function allVideoFolders(t,c,vid){
  const roots=[c.root],legacy=await folder(t,c.root,'slides-v1');if(legacy)roots.push(legacy);
  const found=[],seen=new Set();
@@ -100,6 +118,20 @@ async function allVideoFolders(t,c,vid){
   for(const f of [...tagged,...named]){
    if(f.appProperties?.[VIDEO_KEY]&&f.appProperties[VIDEO_KEY]!==vid)throw Error('影片 ID 中繼資料衝突');
    if(!seen.has(f.id)){seen.add(f.id);found.push(f);}
+  }
+ }
+ // Existing ID-only folders might have been renamed from Drive's UI. Recover them
+ // by stable Drive file ID before any code path is allowed to create a new folder.
+ if(!found.length){
+  const index=await loadRootIndex(t,c).catch(()=>null);
+  const row=index?.videos.find(v=>v.videoId===vid&&v.folderId);
+  if(row){
+   const meta=await json(t,'/files/'+encodeURIComponent(row.folderId)+'?fields=id,name,mimeType,parents,trashed,appProperties');
+   if(meta.id!==row.folderId||meta.mimeType!==FOLDER||meta.trashed||
+      !meta.parents?.some(p=>roots.includes(p))||
+      (meta.appProperties?.[VIDEO_KEY]&&meta.appProperties[VIDEO_KEY]!==vid))
+    throw Error('雲端索引的影片資料夾已移動或辨識衝突：'+vid);
+   found.push(await ensureFolderTag(t,meta,vid));
   }
  }
  return found;
@@ -213,11 +245,23 @@ async function uploadTextFile(t,c,name,mime,text){
  }
 }
 function humanIndex(data){
- const lines=['# YouTube Slides 索引','','- 最後更新：'+new Date(data.generated_at).toLocaleString('zh-TW',{hour12:false}),'- 影片數量：'+data.videos.length,'- 圖片數量：'+data.videos.reduce((n,v)=>n+v.count,0),'','## 影片列表',''];
- for(const v of [...data.videos].sort((a,b)=>b.updatedAt-a.updatedAt||a.videoId.localeCompare(b.videoId))){
-  const title=(v.title||v.videoId).replace(/[\r\n|\[\]]/g,' ').trim();
+ const lines=['# YouTube Slides 索引','','- 最後更新：'+new Date(data.generated_at).toLocaleString('zh-TW',{hour12:false}),'- 影片數量：'+data.videos.length,'- 圖片數量：'+data.videos.reduce((n,v)=>n+v.count,0),'','## 影片列表','','| 日期 | 影片標題 | 截圖 | YouTube |','|:--|:--|--:|:--|'];
+ function splitTitle(v){
+  const raw=cleanVideoTitle(v.title||v.videoId,v.videoId).replace(/[\r\n|\[\]]/g,' ').trim();
+  const m=raw.match(/^(\d{4})\s*[\/.-]\s*(\d{1,2})\s*[\/.-]\s*(\d{1,2})\s*(?:[(（][一二三四五六日天][)）])?\s*/);
+  const date=m?m[1]+'-'+m[2].padStart(2,'0')+'-'+m[3].padStart(2,'0'):'—';
+  // Date is shown in its own column; never lose the full title in index.json.
+  const title=(m?raw.slice(m[0].length):raw).trim()||raw;
+  return {date,title:title.replace(/\|/g,'｜')};
+ }
+ const sorted=[...data.videos].sort((a,b)=>{
+  const da=splitTitle(a).date,db=splitTitle(b).date;
+  return (db==='—'?'':db).localeCompare(da==='—'?'':da)||b.updatedAt-a.updatedAt||a.videoId.localeCompare(b.videoId);
+ });
+ for(const v of sorted){
+  const {date,title}=splitTitle(v);
   const label=v.folderId?'['+title+'](https://drive.google.com/drive/folders/'+encodeURIComponent(v.folderId)+')':title;
-  lines.push('- '+label+' · '+v.count+' 張 · [YouTube](https://www.youtube.com/watch?v='+encodeURIComponent(v.videoId)+')');
+  lines.push('| '+date+' | '+label+' | '+v.count+' | [觀看](https://www.youtube.com/watch?v='+encodeURIComponent(v.videoId)+') |');
  }
  lines.push('','- 此檔案自動產生，請勿直接修改；實際圖片以 Google Drive 內 PNG 為準。');
  return lines.join('\n')+'\n';
@@ -250,12 +294,16 @@ async function summarizeIndex(snapshot){
 }
 async function scanRootIndex(t,c){
  const prior=await loadRootIndex(t,c).catch(()=>null),priorTitles=new Map((prior?.videos||[]).map(v=>[v.videoId,v.title]));
+ const byFolder=new Map((prior?.videos||[]).filter(v=>v.folderId).map(v=>[v.folderId,v.videoId]));
  const roots=[c.root],legacy=await folder(t,c.root,'slides-v1');if(legacy)roots.push(legacy);
  const map=new Map(),now=Date.now();
  for(const root of roots){
   const dirs=await children(t,root,'mimeType = '+qstr(FOLDER));
   for(const dir of dirs){
-   const vid=folderIdFor(dir);if(!vid)continue;
+   const tagged=folderIdFor(dir),priorVid=byFolder.get(dir.id);
+   if(tagged&&priorVid&&tagged!==priorVid)throw Error('索引對應的影片 ID 與資料夾標記不同：'+dir.id);
+   const vid=tagged||priorVid;if(!vid)continue;
+   if(!tagged)await ensureFolderTag(t,dir,vid);
    let record=map.get(vid);if(!record){record={videoId:vid,title:ID.test(dir.name)?'':dir.name,count:0,folderId:dir.id,updatedAt:0,names:new Map()};map.set(vid,record);}
    const found=await children(t,dir.id);
    for(const item of found){
