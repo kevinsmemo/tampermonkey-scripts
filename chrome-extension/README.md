@@ -1,4 +1,4 @@
-# YouTube Slides Extractor — Chrome Extension v0.3.6 (Cloud Alpha)
+# YouTube Slides Extractor — Chrome Extension v0.3.7 (Cloud Alpha)
 
 ## 安裝與連接
 
@@ -9,6 +9,14 @@
 5. 授權後重整 YouTube，點歷史紀錄的「更新索引」。
 
 固定擴充套件 ID：kbghnfojpidgmkfmjnajikpnhgcpphan
+
+## v0.3.7
+- 將 YouTube 網域 `localStorage` 內的歷史影片張數與標題，安全遷移至擴充套件專用 `chrome.storage.local`，儲存使用每部影片獨立 key，不與其他網站共享。原資料在成功寫入後才刪除；若遷移失敗，保留原資料以供重試。
+- 透過 service worker 序列化批次寫入，避免多個 YouTube 分頁同時覆寫整份索引；各分頁使用 `chrome.storage.onChanged` 接收更新。
+- 索引更新以 750 ms 批次合併後一次寫入，降低頻繁的 `localStorage` 同步存取及背景訊息數量。更新標題不再觸發整頁縮圖掃描；標記存在檢查改為 O(1) 計數。
+- 上傳流程新增每部影片資料夾 ID 的 5 分鐘記憶體快取，重複上傳同部影片時不需反覆查詢資料夾；快取不涉及 PNG 內容，上傳失敗仍保留待傳原圖。
+- 保留無須 Google 登入的本機離線模式；新使用者預設使用自己 Google Drive 的專用資料夾（drive.file）。原有使用者授權模式、圖片、索引檔及固定擴充套件 ID 不變。首次設定頁也明確說明 Google 登入為選用。
+- Google Drive 根目錄 `index.json` 仍是可修復的快取，不承諾原子多裝置寫入；公開版仍需進一步完成衝突防護及 Chrome Web Store／OAuth 發行流程。
 
 ## v0.3.6
 - 索引寫入由固定每 2 分鐘改為事件驅動：最近一次 PNG 成功上傳後若閒置滿 5 分鐘，才更新 `index.json` 與 `INDEX.md`；持續上傳時，最遲在首次待更新標記 30 分鐘後執行一次快照更新。
