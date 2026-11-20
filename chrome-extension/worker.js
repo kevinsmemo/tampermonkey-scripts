@@ -100,12 +100,17 @@ async function previewNames(){
  const rows=await legacyCandidates(t,c);
  return {ready:rows.filter(r=>r.ready).length,missingTitle:rows.filter(r=>!r.ready).length,folders:rows.map(({videoId,title,ready})=>({videoId,title,ready})),pending:await pendingCount()};
 }
-async function migrateNames(){
+async function migrateNames(m){
  const c=await config();if(!c)throw Error('尚未連接 Google Drive');
  if(await pendingCount())throw Error('仍有待上傳的圖片，請先完成同步');
  const t=await auth(c);await checkRoot(t,c);
  const rows=await legacyCandidates(t,c);let renamed=0,skipped=0;
+ const titles=m?.titles&&typeof m.titles==='object'&&!Array.isArray(m.titles)?m.titles:{};
  for(const r of rows){
+  if(Object.prototype.hasOwnProperty.call(titles,r.videoId)&&typeof titles[r.videoId]==='string'&&titles[r.videoId].trim()){
+   r.title=cleanVideoTitle(titles[r.videoId].slice(0,350),r.videoId);
+   r.ready=r.title!==r.videoId;
+  }
   if(!r.ready){skipped++;continue;}
   const old=await json(t,'/files/'+encodeURIComponent(r.folderId)+'?fields=id,name,mimeType,parents,trashed,appProperties');
   if(old.trashed||old.mimeType!==FOLDER||old.name!==r.videoId||!old.parents?.includes(r.parent)||old.appProperties?.[VIDEO_KEY])throw Error('資料夾在整理期間發生變化，已停止；已整理 '+renamed+' 個');
@@ -212,7 +217,7 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  case 'details':data=await details();break;
  case 'verify':data=await queue(verifyConnection);break;
  case 'previewNames':data=await queue(previewNames);break;
- case 'migrateNames':data=await queue(migrateNames);break;
+ case 'migrateNames':data=await queue(()=>migrateNames(m));break;
  case 'options':await chrome.runtime.openOptionsPage();data=true;break;
  case 'connect':data=await queue(()=>connect(m));await arm();void queue(flush).catch(()=>{});break;
  case 'put':data=await queueWrite(()=>put(m));try{await arm();}catch(_){}requestImmediateSync();break;
