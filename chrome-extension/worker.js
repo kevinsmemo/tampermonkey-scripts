@@ -4,7 +4,7 @@ const API='https://www.googleapis.com/drive/v3',UPLOAD='https://www.googleapis.c
 const FOLDER='application/vnd.google-apps.folder',LIMIT=24*1024*1024,FILE_SCOPE='https://www.googleapis.com/auth/drive.file',ALL_SCOPE='https://www.googleapis.com/auth/drive';
 const ID=/^[A-Za-z0-9_-]{11}$/,NAME=/^slide_\d{13}_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(direct|tab)_(quick|normal)\.png$/;
 const key=(vid,name)=>vid+'/'+name;
-const VIDEO_KEY='youtubeVideoId';
+const VIDEO_KEY='youtubeVideoId',INDEX_NAME='index.json',INDEX_MD='INDEX.md',INDEX_MAX=3*1024*1024,INDEX_INTERVAL=15*60*1000;
 let dbPromise,serial=Promise.resolve(),writeSerial=Promise.resolve();
 function queueWrite(fn){const p=writeSerial.then(fn);writeSerial=p.catch(()=>{});return p;}
 function queue(fn){const p=serial.then(fn);serial=p.catch(()=>{});return p;}
@@ -19,7 +19,7 @@ function pendingCount(){return tx(['meta'],'readonly',(t,done)=>{const r=t.objec
 async function updateHealth(patch){const old=(await chrome.storage.local.get('syncHealth')).syncHealth||{};await chrome.storage.local.set({syncHealth:{...old,...patch}});}
 async function state(){
  const c=await config(),pending=await pendingCount(),data=await chrome.storage.local.get(['lastSync','syncHealth']),health=data.syncHealth||{};
- return {connected:!!c,pending,mode:c?.mode||'',lastSync:data.lastSync||'',syncing:syncRunning,lastCheckedAt:health.lastCheckedAt||0,lastUploadedAt:health.lastUploadedAt||0,lastUploadCount:health.lastUploadCount||0,checkError:health.checkError||'',syncError:health.syncError||'',clientConfigured:!!chrome.runtime.getManifest().oauth2?.client_id};
+ return {connected:!!c,pending,mode:c?.mode||'',lastSync:data.lastSync||'',syncing:syncRunning,indexError:health.indexError||'',lastCheckedAt:health.lastCheckedAt||0,lastUploadedAt:health.lastUploadedAt||0,lastUploadCount:health.lastUploadCount||0,checkError:health.checkError||'',syncError:health.syncError||'',clientConfigured:!!chrome.runtime.getManifest().oauth2?.client_id};
 }
 async function details(){const c=await config();return {...await state(),root:c?.root||'',rootName:c?.rootName||''};}
 async function verifyConnection(){
@@ -129,6 +129,161 @@ async function addRemote(r){const old=await read('meta',r.key);if(old?.state==='
  // Do not silently label a different on-disk backup as the latest cloud file.
  if(old&&(old.modified!==r.modified||old.size!==r.size)&&await read('bytes',r.key))return old;
  const next={...r,title:old?.title||''};await saveRecord(next);return next;}
+// Root-level index is advisory metadata. PNGs and their Drive file IDs remain authoritative.
+function validateIndex(raw,c){
+ if(!raw||raw.schema_version!==1||raw.root_id!==c.root||!Array.isArray(raw.videos)||raw.videos.length>100000)throw Error('雲端 index.json 格式或資料夾不符');
+ const seen=new Set(),videos=[];
+ for(const v of raw.videos){
+  if(!ID.test(v?.videoId||'')||!Number.isSafeInteger(v.count)||v.count<0||v.count>1000000||seen.has(v.videoId)||typeof v.title!=='string'||v.title.length>350||typeof v.folderId!=='string'||v.folderId.length>150||!Number.isFinite(v.updatedAt)||v.updatedAt<0)throw Error('雲端 index.json 含無效影片紀錄');
+  seen.add(v.videoId);videos.push({videoId:v.videoId,title:v.title,count:v.count,folderId:v.folderId,updatedAt:v.updatedAt});
+ }
+ return {schema_version:1,root_id:c.root,generated_at:Number(raw.generated_at)||0,videos};
+}
+async function namedIndexFile(t,c,name){
+ const files=await children(t,c.root,'name = '+qstr(name));
+ if(files.length>1)throw Error('發現多個 '+name+'，為避免索引衝突已停止寫入');
+ if(files.length&&files[0].mimeType!==(name===INDEX_NAME?'application/json':'text/markdown'))throw Error(name+' 類型與預期不符');
+ return files[0]||null;
+}
+async function loadRootIndex(t,c){
+ const f=await namedIndexFile(t,c,INDEX_NAME);if(!f)return null;
+ if(Number(f.size)>INDEX_MAX)throw Error('index.json 大小超過安全上限');
+ const response=await fetchApi(t,API+'/files/'+encodeURIComponent(f.id)+'?alt=media');
+ const raw=await response.text();if(raw.length>INDEX_MAX)throw Error('index.json 內容超過上限');
+ let data;try{data=JSON.parse(raw);}catch(_){throw Error('index.json 格式無法解析');}
+ return validateIndex(data,c);
+}
+async function uploadTextFile(t,c,name,mime,text){
+ const file=await namedIndexFile(t,c,name),blob=new Blob([text],{type:mime});
+ if(file){
+  const changed=await (await fetchApi(t,UPLOAD+'/'+encodeURIComponent(file.id)+'?uploadType=media&fields=id,name,size',{method:'PATCH',headers:{'Content-Type':mime},body:blob})).json();
+  if(changed.id!==file.id)throw Error('更新 '+name+' 後驗證失敗');
+ }else{
+  const boundary='ix_'+crypto.randomUUID().replace(/-/g,'');
+  const payload=new Blob(['--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name,mimeType:mime,parents:[c.root]})+'\r\n--'+boundary+'\r\nContent-Type: '+mime+'\r\n\r\n',blob,'\r\n--'+boundary+'--\r\n']);
+  const result=await (await fetchApi(t,UPLOAD+'?uploadType=multipart&fields=id,name',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},body:payload})).json();
+  if(!result.id||result.name!==name)throw Error('建立 '+name+' 失敗');
+ }
+}
+function humanIndex(data){
+ const lines=['# YouTube Slides 索引','','- 最後更新：'+new Date(data.generated_at).toLocaleString('zh-TW',{hour12:false}),'- 影片數量：'+data.videos.length,'- 圖片數量：'+data.videos.reduce((n,v)=>n+v.count,0),'','## 影片列表',''];
+ for(const v of [...data.videos].sort((a,b)=>b.updatedAt-a.updatedAt||a.videoId.localeCompare(b.videoId))){
+  const title=(v.title||v.videoId).replace(/[\r\n|\[\]]/g,' ').trim();
+  const label=v.folderId?'['+title+'](https://drive.google.com/drive/folders/'+encodeURIComponent(v.folderId)+')':title;
+  lines.push('- '+label+' · '+v.count+' 張 · [YouTube](https://www.youtube.com/watch?v='+encodeURIComponent(v.videoId)+')');
+ }
+ lines.push('','- 此檔案自動產生，請勿直接修改；實際圖片以 Google Drive 內 PNG 為準。');
+ return lines.join('\n')+'\n';
+}
+async function saveRootIndex(t,c,data){
+ const snapshot=validateIndex({...data,generated_at:Date.now()},c);
+ snapshot.generated_at=Date.now();
+ const raw=JSON.stringify(snapshot,null,2)+'\n';
+ if(raw.length>INDEX_MAX)throw Error('索引資料超過安全上限，停止更新');
+ await uploadTextFile(t,c,INDEX_NAME,'application/json',raw);
+ await uploadTextFile(t,c,INDEX_MD,'text/markdown',humanIndex(snapshot));
+ await chrome.storage.local.set({indexCache:snapshot,indexCheckedAt:Date.now()});
+ return snapshot;
+}
+function localIndexRows(){
+ return records().then(items=>{
+  const groups=new Map();
+  for(const r of items){if(!ID.test(r.videoId||''))continue;let group=groups.get(r.videoId);if(!group){group={videoId:r.videoId,count:0,title:'',updatedAt:0};groups.set(r.videoId,group);}group.count++;if(r.title&&r.title!==r.videoId)group.title=r.title;group.updatedAt=Math.max(group.updatedAt,r.modified||0);}
+  return [...groups.values()];
+ });
+}
+async function summarizeIndex(snapshot){
+ const rows=new Map((snapshot?.videos||[]).map(v=>[v.videoId,{videoId:v.videoId,title:v.title,count:v.count,updatedAt:v.updatedAt}]));
+ for(const v of await localIndexRows()){
+  const current=rows.get(v.videoId);
+  if(!current)rows.set(v.videoId,v);
+  else{current.count=Math.max(current.count,v.count);if(!current.title&&v.title)current.title=v.title;current.updatedAt=Math.max(current.updatedAt,v.updatedAt);}
+ }
+ return [...rows.values()];
+}
+async function scanRootIndex(t,c){
+ const roots=[c.root],legacy=await folder(t,c.root,'slides-v1');if(legacy)roots.push(legacy);
+ const map=new Map(),now=Date.now();
+ for(const root of roots){
+  const dirs=await children(t,root,'mimeType = '+qstr(FOLDER));
+  for(const dir of dirs){
+   const vid=folderIdFor(dir);if(!vid)continue;
+   let record=map.get(vid);if(!record){record={videoId:vid,title:ID.test(dir.name)?'':dir.name,count:0,folderId:dir.id,updatedAt:0,names:new Map()};map.set(vid,record);}
+   const found=await children(t,dir.id);
+   for(const item of found){
+    if(!NAME.test(item.name)||item.mimeType!=='image/png')continue;
+    const existing=record.names.get(item.name);if(existing&&existing!==item.id)throw Error('同一影片存在重複 PNG 名稱：'+vid);
+    record.names.set(item.name,item.id);
+    record.updatedAt=Math.max(record.updatedAt,Date.parse(item.modifiedTime)||now);
+   }
+  }
+ }
+ const locals=new Map((await localIndexRows()).map(r=>[r.videoId,r]));
+ return {schema_version:1,root_id:c.root,generated_at:now,videos:[...map.values()].map(({names,...v})=>({...v,title:locals.get(v.videoId)?.title||v.title,count:names.size,updatedAt:v.updatedAt||now}))};
+}
+async function cloudIndex(forceScan=false,quick=false){
+ const c=await config();if(!c)return {rows:await localIndexRows(),warning:'尚未連接 Google Drive',source:'local',state:await state()};
+ let snapshot=null,source='local',warning='';
+ try{
+  const cache=await chrome.storage.local.get(['indexCache','indexCheckedAt']);
+  if(quick&&cache.indexCache?.root_id===c.root&&Date.now()-(cache.indexCheckedAt||0)<INDEX_INTERVAL){snapshot=validateIndex(cache.indexCache,c);source='cache';}
+  else{
+   const t=await auth(c);await checkRoot(t,c);
+   if(forceScan){snapshot=await scanRootIndex(t,c);snapshot=await saveRootIndex(t,c,snapshot);source='rebuild';}
+   else{
+    snapshot=await loadRootIndex(t,c);
+    if(!snapshot&&!quick){snapshot=await scanRootIndex(t,c);snapshot=await saveRootIndex(t,c,snapshot);source='rebuild';}
+    else if(snapshot){source='index';await chrome.storage.local.set({indexCache:snapshot,indexCheckedAt:Date.now()});}
+    else source='local';
+   }
+  }
+ }catch(e){warning='雲端索引暫不可用，保留本機資料：'+String(e?.message||e).slice(0,160);}
+ return {rows:await summarizeIndex(snapshot),source,generatedAt:snapshot?.generated_at||0,warning,state:await state()};
+}
+async function markIndexDirty(ids){
+ const stored=await chrome.storage.local.get('indexDirtyIds');
+ const all=new Set(Array.isArray(stored.indexDirtyIds)?stored.indexDirtyIds:[]);
+ for(const id of ids)if(ID.test(id))all.add(id);
+ await chrome.storage.local.set({indexDirtyIds:[...all]});
+ await chrome.alarms.create('slides-index',{delayInMinutes:2});
+}
+async function syncCloudIndex(){
+ const stored=await chrome.storage.local.get('indexDirtyIds');
+ const ids=(Array.isArray(stored.indexDirtyIds)?stored.indexDirtyIds:[]).filter(v=>ID.test(v));
+ if(!ids.length)return;
+ try{
+  const c=await config();if(!c)return;
+  const t=await auth(c);await checkRoot(t,c);
+  // An absent index is built once. Existing indexes are merged with local uploaded records.
+  let snapshot=await loadRootIndex(t,c);
+  if(!snapshot)snapshot=await scanRootIndex(t,c);
+  else{
+   const map=new Map(snapshot.videos.map(v=>[v.videoId,v]));
+   for(const vid of ids){
+    const rows=await records('videoId',vid),old=map.get(vid);
+    const folders=await allVideoFolders(t,c,vid);
+    if(!folders.length)throw Error('索引更新時找不到影片資料夾：'+vid);
+    // Count only filenames for the touched video, preventing lost increments across devices.
+    const names=new Map();
+    for(const f of folders)for(const item of await children(t,f.id)){
+     if(!NAME.test(item.name)||item.mimeType!=='image/png')continue;
+     if(names.has(item.name)&&names.get(item.name)!==item.id)throw Error('影片資料夾內發現重複檔名，已停止更新索引');
+     names.set(item.name,item.id);
+    }
+    const title=rows.find(r=>r.title&&r.title!==vid)?.title||old?.title||(!ID.test(folders[0].name)?folders[0].name:'');
+    map.set(vid,{videoId:vid,title,count:names.size,folderId:folders[0].id,updatedAt:Date.now()});
+   }
+   snapshot.videos=[...map.values()];
+  }
+  await saveRootIndex(t,c,snapshot);
+  // Only clear the dirty set after both JSON and Markdown are successfully uploaded.
+  await chrome.storage.local.remove('indexDirtyIds');
+  await updateHealth({indexError:''});
+ }catch(e){
+  await updateHealth({indexError:String(e?.message||e).slice(0,200)});
+  await chrome.alarms.create('slides-index',{delayInMinutes:5});
+ }
+}
 async function catalog(vid){
  const c=await config();let warning='';
  if(c)try{const t=await auth(c);await checkRoot(t,c);for(const r of await remoteVideo(t,c,vid))await addRemote(r);}catch(e){warning='雲端暫不可用，使用本機索引：'+e.message;}
@@ -146,12 +301,9 @@ async function get(m){const k=key(m.videoId,m.name),r=await read('meta',k);if(!r
  if(Number(meta.size)>LIMIT)throw Error('PNG exceeds 24 MiB');
  const downloaded=await (await fetchApi(t,API+'/files/'+encodeURIComponent(r.driveId)+'?alt=media')).blob();
  return {data:await encode64(downloaded),modified:Date.parse(meta.modifiedTime)||0};}
-async function index(){const c=await config();let warning='';
- if(c)try{const t=await auth(c);await checkRoot(t,c);const roots=[c.root],legacy=await folder(t,c.root,'slides-v1');if(legacy)roots.push(legacy);const ids=new Set();
- for(const root of roots)for(const r of await children(t,root,'mimeType = '+qstr(FOLDER))){const vid=folderIdFor(r);if(vid)ids.add(vid);}
- for(const vid of ids)for(const r of await remoteVideo(t,c,vid))await addRemote(r);
- }catch(e){warning='雲端索引更新未完整完成：'+e.message+'；保留本機資料';}
- const groups=new Map();for(const r of await records()){const x=groups.get(r.videoId)||{videoId:r.videoId,count:0,title:''};x.count++;if(r.title)x.title=r.title;groups.set(r.videoId,x);}return {rows:[...groups.values()],warning,state:await state()};}
+async function index(){return cloudIndex(false,false);}
+async function indexQuick(){return cloudIndex(false,true);}
+async function rebuildIndex(){return cloudIndex(true,false);}
 async function connect(m){const current=await config(),mode=m.mode==='existing'?'existing':'new',scope=mode==='existing'?ALL_SCOPE:FILE_SCOPE,t=await token(scope,true),who=await owner(t);
  if(current){if(current.owner!==who||current.mode!==mode)throw Error('此安裝已綁定另一帳號／模式；不會轉送現有離線資料');await checkRoot(t,current);await updateHealth({lastCheckedAt:Date.now(),checkError:''});return state();}
  let root,rootName;
@@ -172,18 +324,18 @@ async function flush(checkWhenEmpty=false){
  const c=await config();if(!c)return state();
  const pending=await records('state','pending');
  if(!pending.length){await reconcileAlarm();if(checkWhenEmpty)await verifyConnection();return state();}
- syncRunning=true;let uploaded=0,verified=false;
+ syncRunning=true;let uploaded=0,verified=false,uploadedIds=new Set();
  try{
   const t=await auth(c);await checkRoot(t,c);verified=true;
   await updateHealth({lastCheckedAt:Date.now(),checkError:''});
-  for(const r of pending.slice(0,5)){await uploadOne(t,c,r);uploaded++;}
+  for(const r of pending.slice(0,5)){await uploadOne(t,c,r);uploaded++;uploadedIds.add(r.videoId);}
   await updateHealth({syncError:'',...(uploaded?{lastUploadedAt:Date.now(),lastUploadCount:uploaded}:{})});
   await chrome.storage.local.set({lastSync:'同步批次完成 '+new Date().toLocaleString()});
  }catch(e){
   const message=String(e?.message||e).slice(0,240);
   await updateHealth({syncError:message,...(!verified?{checkError:message}:{}),...(uploaded?{lastUploadedAt:Date.now(),lastUploadCount:uploaded}:{})});
   await chrome.storage.local.set({lastSync:'待同步：'+message});
- }finally{syncRunning=false;await reconcileAlarm();}
+ }finally{syncRunning=false;if(uploadedIds.size)try{await markIndexDirty(uploadedIds);}catch(e){await updateHealth({indexError:'索引排程失敗：'+String(e?.message||e).slice(0,160)}).catch(()=>{});}await reconcileAlarm();}
  return state();
 }
 // After a durable local write, coalesce immediate Drive uploads.
@@ -202,15 +354,15 @@ function requestImmediateSync(){
   finally{immediateSyncQueued=false;}
  }).catch(()=>{immediateSyncQueued=false;});
 }
-chrome.alarms.onAlarm.addListener(a=>{if(a.name==='slides-sync')void queue(flush).catch(()=>{});});
-const resumePending=()=>void queue(async()=>{if(await pendingCount())await arm();}).catch(()=>{});
+chrome.alarms.onAlarm.addListener(a=>{if(a.name==='slides-sync')void queue(flush).catch(()=>{});if(a.name==='slides-index')void queue(syncCloudIndex).catch(()=>{});});
+const resumePending=()=>void queue(async()=>{if(await pendingCount())await arm();const d=await chrome.storage.local.get('indexDirtyIds');if(d.indexDirtyIds?.length)await chrome.alarms.create('slides-index',{delayInMinutes:1});}).catch(()=>{});
 chrome.runtime.onStartup.addListener(resumePending);
 chrome.runtime.onInstalled.addListener(resumePending);
 chrome.action.onClicked.addListener(()=>void chrome.runtime.openOptionsPage());
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  if(sender.id!==chrome.runtime.id||!m||typeof m.type!=='string')return false;
  const options=sender.url===chrome.runtime.getURL('options.html'),yt=/^https:\/\/(?:www|m)\.youtube\.com\//.test(sender.url||'');
- if(!options&&!yt)return false;if(['connect','syncNow','details','verify','previewNames','migrateNames'].includes(m.type)&&!options)return false;
+ if(!options&&!yt)return false;if(['connect','syncNow','details','verify','previewNames','migrateNames','rebuildIndex'].includes(m.type)&&!options)return false;
  if(['put','get','list'].includes(m.type)&&(!ID.test(m.videoId||'')||(['put','get'].includes(m.type)&&!NAME.test(m.name||'')))){reply({ok:false,error:'Invalid video or filename'});return false;}
  (async()=>{let data;switch(m.type){
  case 'status':data=await state();break;
@@ -224,6 +376,8 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  case 'list':data=await queue(()=>catalog(m.videoId));break;
  case 'get':data=await queue(()=>get(m));break;
  case 'index':data=await queue(index);break;
+ case 'indexQuick':data=await queue(indexQuick);break;
+ case 'rebuildIndex':data=await queue(rebuildIndex);break;
  case 'sync':data=await queue(flush);break;
  case 'syncNow':data=await queue(()=>flush(true));break;
  default:throw Error('Unsupported operation');}reply({ok:true,data});})().catch(e=>reply({ok:false,error:String(e.message||e).slice(0,240)}));return true;
