@@ -14,9 +14,9 @@
 <div class="row"><button class="primary" id="sync" disabled>立即同步</button><button id="verify" disabled>檢查連線</button><button id="reauth" hidden disabled>重新授權</button></div>
 <div class="message" id="result" role="status"></div><div class="message" id="health" role="status"></div>
 </section>
-<section class="card" id="loginCard" hidden><h2>開始使用 Google Drive</h2><p class="muted">登入後直接讀取與上傳 PNG，不需要開啟 Drive 電腦版。離線擷取仍可使用。</p>
-<label class="choice"><input type="radio" name="mode" value="new" checked><span><strong>使用專用資料夾（最小權限）</strong><span class="muted">建立 YouTube Slides - API，不會自動匯入舊圖片。</span></span></label>
-<label class="choice"><input type="radio" name="mode" value="existing"><span><strong>沿用既有 YouTube Slides 資料夾</strong><span class="muted">可讀取原有圖片；Google 會要求完整 Drive 存取權限。</span></span></label>
+<section class="card" id="loginCard" hidden><h2>選用：Google Drive 自動備份</h2><p class="muted">不登入 Google 也能在 YouTube 擷取投影片、離線保存並匯出 ZIP。登入後，圖片會自動備份到你自己的 Google Drive，不會上傳到開發者的帳號。</p>
+<label class="choice"><input type="radio" name="mode" value="new" checked><span><strong>使用專用資料夾（最小權限）</strong><span class="muted">推薦新使用者：在你自己的 Google Drive 建立 YouTube Slides - API，僅要求指定檔案存取權限。</span></span></label>
+<label class="choice"><input type="radio" name="mode" value="existing"><span><strong>沿用既有 YouTube Slides 資料夾</strong><span class="muted">進階相容模式：讀取已存在的資料夾，可能需要完整 Drive 權限。公開版建議優先使用專用資料夾。</span></span></label>
 <div id="existingFields" hidden><label for="folder">既有資料夾網址或 ID</label><input class="field" id="folder" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off"><label class="row"><input type="checkbox" id="confirm"> 我了解完整 Drive 權限，並確認資料夾。</label></div>
 <p><button class="primary full" id="login" disabled>使用 Google 帳號登入</button></p><p class="muted">同一安裝只綁定一個帳號及資料夾。套件不提供雲端刪除功能。</p></section>
 <section class="card" id="namingCard" hidden>
