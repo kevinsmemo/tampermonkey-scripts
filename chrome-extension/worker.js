@@ -2,7 +2,29 @@
 // Tokens stay in the extension service worker. No external messaging.
 const API='https://www.googleapis.com/drive/v3',UPLOAD='https://www.googleapis.com/upload/drive/v3/files';
 const FOLDER='application/vnd.google-apps.folder',LIMIT=24*1024*1024,FILE_SCOPE='https://www.googleapis.com/auth/drive.file',ALL_SCOPE='https://www.googleapis.com/auth/drive';
-const ID=/^[A-Za-z0-9_-]{11}$/,NAME=/^slide_\d{13}_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(direct|tab)_(quick|normal)\.png$/;
+const ID=/^[A-Za-z0-9_-]{11}$/;
+const LEGACY_NAME=/^slide_(\d{13})_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_(direct|tab)_(quick|normal)\.png$/;
+const SIMPLE_NAME=/^(\d{2,})-(\d{2})-(\d{2})-(\d{3})(?:_(\d{2,}))?\.png$/;
+const NAME={test:name=>validSlideName(name)};
+const SIDECAR_NAME='slides.json',SIDECAR_MAX=1024*1024;
+const SLIDE_ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function slideFileInfo(name){
+ const legacy=LEGACY_NAME.exec(String(name));
+ if(legacy)return {timestampMs:Number(legacy[1]),slideId:legacy[2],source:legacy[3],mode:legacy[4],legacy:true};
+ const m=SIMPLE_NAME.exec(String(name));if(!m)return null;
+ const hh=Number(m[1]),mm=Number(m[2]),ss=Number(m[3]),ms=Number(m[4]);
+ if(hh>99999||mm>59||ss>59||ms>999||m[5]&&Number(m[5])<2)return null;
+ const timestampMs=((hh*60+mm)*60+ss)*1000+ms;
+ return Number.isSafeInteger(timestampMs)?{timestampMs,sequence:Number(m[5]||1),legacy:false}:null;
+}
+function validSlideName(name){return !!slideFileInfo(name);}
+function slideTimeName(ms,sequence=1){
+ if(!Number.isSafeInteger(ms)||ms<0||ms>99999*3600000+3599999)throw Error('Invalid slide timestamp');
+ const pad=(n,size)=>String(n).padStart(size,'0');
+ const h=Math.floor(ms/3600000),m=Math.floor(ms/60000)%60,s=Math.floor(ms/1000)%60;
+ return pad(h,2)+'-'+pad(m,2)+'-'+pad(s,2)+'-'+pad(ms%1000,3)+(sequence>1?'_'+pad(sequence,2):'')+'.png';
+}
+
 const key=(vid,name)=>vid+'/'+name;
 const HISTORY_PREFIX='dg-slides-history-v2:',HISTORY_LIST_KEY='dg-slides-history-ids-v2';
 const VIDEO_DIR_TTL=5*60*1000;
@@ -202,12 +224,77 @@ async function migrateNames(m){
  }
  return {renamed,skipped};
 }
-function cloudMeta(vid,r){return {key:key(vid,r.name),videoId:vid,name:r.name,size:Number(r.size)||0,modified:Date.parse(r.modifiedTime)||0,driveId:r.id,state:'cloud'};}
-async function remoteVideo(t,c,vid){const result=new Map();for(const dir of await videoDirs(t,c,vid)){for(const r of await children(t,dir)){if(!NAME.test(r.name)||r.mimeType!=='image/png')continue;if(result.has(r.name)&&result.get(r.name).driveId!==r.id)throw Error('雲端同名 PNG 重複，請先整理');result.set(r.name,cloudMeta(vid,r));}}return [...result.values()];}
-async function addRemote(r){const old=await read('meta',r.key);if(old?.state==='pending')return old;if(old?.driveId&&old.driveId!==r.driveId)throw Error('檔案識別變更，保留本機資料');
- // Do not silently label a different on-disk backup as the latest cloud file.
- if(old&&(old.modified!==r.modified||old.size!==r.size)&&await read('bytes',r.key))return old;
- const next={...r,title:old?.title||''};await saveRecord(next);return next;}
+function slideMetaFromDrive(vid,r,sidecar){
+ const parsed=slideFileInfo(r.name),props=r.appProperties||{},archived=sidecar?.get(r.id);
+ if(!parsed)return null;
+ const timestampMs=Number(props.timestampMs??archived?.timestampMs??parsed.timestampMs);
+ if(!Number.isSafeInteger(timestampMs)||timestampMs<0||timestampMs>359999999999)return null;
+ const slideId=props.slideId||archived?.slideId||parsed.slideId||'';
+ const source=props.source||archived?.source||parsed.source||'';
+ const mode=props.mode||archived?.mode||parsed.mode||'';
+ const capturedAt=props.capturedAt||archived?.capturedAt||'';
+ return {timestampMs,slideId:SLIDE_ID.test(slideId)?slideId:'',source:['direct','tab'].includes(source)?source:'',mode:['quick','normal'].includes(mode)?mode:'',capturedAt:typeof capturedAt==='string'?capturedAt.slice(0,50):'',legacyName:archived?.legacyName||''};
+}
+function cloudMeta(vid,r,sidecar){
+ const meta=slideMetaFromDrive(vid,r,sidecar);
+ return {key:key(vid,r.name),videoId:vid,name:r.name,size:Number(r.size)||0,modified:Date.parse(r.modifiedTime)||0,driveId:r.id,state:'cloud',...meta};
+}
+async function slideSidecar(t,files,vid){
+ const found=files.filter(f=>f.name===SIDECAR_NAME);
+ if(!found.length)return null;
+ if(found.length!==1||found[0].mimeType!=='application/json'||Number(found[0].size)>SIDECAR_MAX)throw Error('slides.json 重複或太大，已停止同步');
+ const raw=await (await fetchApi(t,API+'/files/'+encodeURIComponent(found[0].id)+'?alt=media')).text();
+ if(raw.length>SIDECAR_MAX)throw Error('slides.json 超過上限');
+ const data=JSON.parse(raw);
+ if(data.schema_version!==1||data.video_id!==vid||!Array.isArray(data.slides)||data.slides.length>10000)throw Error('slides.json 格式不符');
+ const mapped=new Map();
+ for(const v of data.slides){if(!v||typeof v.driveId!=='string'||typeof v.timestampMs!=='number'||!Number.isSafeInteger(v.timestampMs)||v.timestampMs<0||mapped.has(v.driveId))throw Error('slides.json 含無效或重複圖片紀錄');mapped.set(v.driveId,v);}
+ return mapped;
+}
+async function remoteVideo(t,c,vid){
+ const result=new Map();
+ for(const dir of await videoDirs(t,c,vid)){
+  const files=await children(t,dir),sidecar=await slideSidecar(t,files,vid);
+  for(const r of files){
+   if(!NAME.test(r.name)||r.mimeType!=='image/png')continue;
+   if(result.has(r.name)&&result.get(r.name).driveId!==r.id)throw Error('雲端同名 PNG 重複，請先整理');
+   result.set(r.name,cloudMeta(vid,r,sidecar));
+  }
+ }
+ return [...result.values()];
+}
+async function migrateLocalName(old,r){
+ if(old.name===r.name)return old;
+ if(old.state==='pending')return old;
+ const existing=await read('meta',r.key);
+ if(existing){if(existing.driveId!==r.driveId)throw Error('新檔名已被不同圖片佔用');return existing;}
+ return tx(['meta','bytes'],'readwrite',(t,done)=>{
+  const meta=t.objectStore('meta'),bytes=t.objectStore('bytes');
+  const target=meta.get(r.key);target.onsuccess=()=>{
+   if(target.result){t.abort();return;}
+   const original=bytes.get(old.key);original.onsuccess=()=>{
+    const updated={...old,...r,key:r.key,name:r.name,state:'cloud'};
+    meta.put(updated);meta.delete(old.key);
+    if(original.result){bytes.put(original.result,r.key);bytes.delete(old.key);}
+    done(updated);
+   };
+  };
+ });
+}
+async function addRemote(r){
+ let old=await read('meta',r.key);
+ if(!old){
+  const siblings=await records('videoId',r.videoId);
+  const prior=siblings.find(x=>x.driveId===r.driveId&&x.key!==r.key)||
+   (r.legacyName?siblings.find(x=>x.name===r.legacyName&&x.state!=='pending'&&!x.driveId):null);
+  if(prior)old=await migrateLocalName(prior,r);
+ }
+ if(old?.state==='pending')return old;
+ if(old?.driveId&&old.driveId!==r.driveId)throw Error('檔案識別變更，保留本機資料');
+ // Keep the same verified local PNG even if Google Drive's rename changed modifiedTime.
+ if(old&&old.size!==r.size&&await read('bytes',r.key))return old;
+ const next={...old,...r,title:old?.title||''};await saveRecord(next);return next;
+}
 // Root-level index is advisory metadata. PNGs and their Drive file IDs remain authoritative.
 function validateIndex(raw,c){
  if(!raw||raw.schema_version!==1||raw.root_id!==c.root||!Array.isArray(raw.videos)||raw.videos.length>100000)throw Error('雲端 index.json 格式或資料夾不符');
@@ -414,13 +501,31 @@ async function syncCloudIndex(){
 async function catalog(vid){
  const c=await config();let warning='';
  if(c)try{const t=await auth(c);await checkRoot(t,c);for(const r of await remoteVideo(t,c,vid))await addRemote(r);}catch(e){warning='雲端暫不可用，使用本機索引：'+e.message;}
- const local=await records('videoId',vid);return {files:local.map(r=>({name:r.name,size:r.size,modified:r.modified})),warning,state:await state()};
+ const local=await records('videoId',vid);return {files:local.map(r=>({name:r.name,size:r.size,modified:r.modified,timestampMs:r.timestampMs,slideId:r.slideId,source:r.source,mode:r.mode,capturedAt:r.capturedAt})),warning,state:await state()};
 }
 function decode64(raw){if(typeof raw!=='string'||raw.length>Math.ceil(LIMIT/3)*4+4)throw Error('PNG exceeds 24 MiB');const b=Uint8Array.from(atob(raw),v=>v.charCodeAt(0));if(b.length>LIMIT||b.slice(0,8).join(',')!=='137,80,78,71,13,10,26,10')throw Error('Invalid PNG');return new Blob([b],{type:'image/png'});}
 async function encode64(blob){if(blob.size>LIMIT)throw Error('PNG exceeds 24 MiB');const b=new Uint8Array(await blob.arrayBuffer());let str='';for(let i=0;i<b.length;i+=32768)str+=String.fromCharCode(...b.subarray(i,i+32768));return btoa(str);}
 async function equal(a,b){if(!a||a.size!==b.size)return false;const [x,y]=await Promise.all([crypto.subtle.digest('SHA-256',await a.arrayBuffer()),crypto.subtle.digest('SHA-256',await b.arrayBuffer())]);return new Uint8Array(x).every((v,i)=>v===new Uint8Array(y)[i]);}
-async function put(m){const blob=decode64(m.data),k=key(m.videoId,m.name),old=await read('meta',k);if(old){const existing=await read('bytes',k);if(!existing||!await equal(existing,blob))throw Error('同名檔案已存在，未覆寫');return {saved:true};}
- await saveRecord({key:k,videoId:m.videoId,name:m.name,title:String(m.title||'').slice(0,350),size:blob.size,modified:Date.now(),state:'pending'},blob);return {saved:true};}
+async function put(m){
+ const blob=decode64(m.data),parsed=slideFileInfo(m.name);if(!parsed)throw Error('Invalid slide name');
+ if(!parsed.legacy&&!SLIDE_ID.test(m.slideId||''))throw Error('Missing slide identity');
+ let name=m.name,k=key(m.videoId,name),old=await read('meta',k);
+ if(old&&old.slideId&&old.slideId===m.slideId){
+  const prior=await read('bytes',k);
+  if(!prior||!await equal(prior,blob))throw Error('同一圖片識別碼對應不同檔案');
+  return {saved:true,name};
+ }
+ if(old&&parsed.legacy){const prior=await read('bytes',k);if(!prior||!await equal(prior,blob))throw Error('舊檔名已存在，未覆寫');return {saved:true,name};}
+ if(old){
+  for(let serial=2;serial<=9999;serial++){
+   name=slideTimeName(parsed.timestampMs,serial);k=key(m.videoId,name);
+   if(!await read('meta',k))break;
+   if(serial===9999)throw Error('同一時間點圖片過多，無法建立唯一名稱');
+  }
+ }
+ const record={key:k,videoId:m.videoId,name,title:String(m.title||'').slice(0,350),size:blob.size,modified:Date.now(),state:'pending',timestampMs:parsed.timestampMs,slideId:m.slideId||parsed.slideId||'',source:['direct','tab'].includes(m.source)?m.source:parsed.source||'',mode:['quick','normal'].includes(m.mode)?m.mode:parsed.mode||'',capturedAt:typeof m.capturedAt==='string'?m.capturedAt.slice(0,50):''};
+ await saveRecord(record,blob);return {saved:true,name};
+}
 async function get(m){const k=key(m.videoId,m.name),r=await read('meta',k);if(!r)throw Error('檔案不在已建立的索引內');const local=await read('bytes',k);if(local)return {data:await encode64(local),modified:r.modified};
  if(!r.driveId)throw Error('本機檔案不存在');const c=await config(),t=await auth(c);await checkRoot(t,c);
  const allowed=await videoDirs(t,c,m.videoId),meta=await json(t,'/files/'+encodeURIComponent(r.driveId)+'?fields=id,name,mimeType,size,modifiedTime,parents,trashed');
@@ -438,11 +543,63 @@ async function connect(m){const current=await config(),mode=m.mode==='existing'?
  const r=await json(t,'/files/'+encodeURIComponent(id)+'?fields=id,name,mimeType,trashed');if(r.trashed||r.mimeType!==FOLDER||r.name!=='YouTube Slides')throw Error('僅接受名稱正確的 YouTube Slides 資料夾');root=r.id;rootName=r.name;
  }else{rootName='YouTube Slides - API';root=await folder(t,'root',rootName,true);}
  await chrome.storage.local.set({config:{root,rootName,mode,scope,owner:who}});await updateHealth({lastCheckedAt:Date.now(),checkError:''});return state();}
-async function uploadOne(t,c,r){const blob=await read('bytes',r.key);if(!blob)throw Error('找不到離線原圖');const dir=await ensureVideoDir(t,c,r.videoId,r.title),matches=await children(t,dir,'name = '+qstr(r.name));let uploaded;
- if(matches.length){if(matches.length!==1||matches[0].mimeType!=='image/png'||Number(matches[0].size)!==blob.size)throw Error('同名衝突，停止覆寫');const existing=await (await fetchApi(t,API+'/files/'+encodeURIComponent(matches[0].id)+'?alt=media')).blob();if(!await equal(existing,blob))throw Error('同名衝突，保留原始檔案');uploaded=matches[0];}
- else{const boundary='dg_'+crypto.randomUUID().replace(/-/g,'');const body=new Blob(['--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:r.name,mimeType:'image/png',parents:[dir]})+'\r\n--'+boundary+'\r\nContent-Type: image/png\r\n\r\n',blob,'\r\n--'+boundary+'--\r\n']);
- uploaded=await (await fetchApi(t,UPLOAD+'?uploadType=multipart&fields=id,name,size,modifiedTime',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},body})).json();if(!uploaded.id||uploaded.name!==r.name||Number(uploaded.size)!==blob.size)throw Error('Google Drive 未完整確認上傳');}
- await saveRecord({...r,state:'cloud',driveId:uploaded.id,modified:Date.parse(uploaded.modifiedTime)||r.modified});}
+async function renamePendingRecord(r,name){
+ if(name===r.name)return r;
+ if(await read('meta',key(r.videoId,name)))throw Error('目標檔名已存在於本機');
+ const next={...r,name,key:key(r.videoId,name)};
+ return tx(['meta','bytes'],'readwrite',(t,done)=>{
+  const meta=t.objectStore('meta'),bytes=t.objectStore('bytes');
+  const image=bytes.get(r.key);image.onsuccess=()=>{
+   if(!image.result){t.abort();return;}
+   meta.put(next);meta.delete(r.key);bytes.put(image.result,next.key);bytes.delete(r.key);done(next);
+  };
+ });
+}
+async function uploadOne(t,c,record){
+ let r=record;
+ const blob=await read('bytes',r.key);if(!blob)throw Error('找不到離線原圖');
+ const dir=await ensureVideoDir(t,c,r.videoId,r.title),parsed=slideFileInfo(r.name);
+ if(!parsed)throw Error('Unknown slide filename');
+ // Older pending items were created before the metadata schema existed.
+ r={...r,timestampMs:Number.isSafeInteger(r.timestampMs)?r.timestampMs:parsed.timestampMs,slideId:r.slideId||parsed.slideId||crypto.randomUUID(),source:r.source||parsed.source||'direct',mode:r.mode||parsed.mode||'normal'};
+ let uploaded=null;
+ for(let tries=0;tries<9999;tries++){
+  const matches=await children(t,dir,'name = '+qstr(r.name));
+  if(matches.length){
+   const matched=matches.find(f=>f.appProperties?.slideId&&f.appProperties.slideId===r.slideId);
+   if(matched){if(Number(matched.size)!==blob.size||!await equal(await (await fetchApi(t,API+'/files/'+encodeURIComponent(matched.id)+'?alt=media')).blob(),blob))throw Error('圖片識別碼重複，內容不同');uploaded=matched;break;}
+   if(parsed.legacy){
+    if(matches.length!==1||matches[0].mimeType!=='image/png'||Number(matches[0].size)!==blob.size)throw Error('舊圖片同名衝突，已停止');
+    if(!await equal(await (await fetchApi(t,API+'/files/'+encodeURIComponent(matches[0].id)+'?alt=media')).blob(),blob))throw Error('舊圖片同名衝突，已停止');uploaded=matches[0];break;
+   }
+   const candidate=slideTimeName(r.timestampMs,tries+2);
+   if(await read('meta',key(r.videoId,candidate)))continue;
+   r=await renamePendingRecord(r,candidate);continue;
+  }
+  const props={slideId:r.slideId,timestampMs:String(r.timestampMs),source:r.source||'direct',mode:r.mode||'normal',capturedAt:r.capturedAt||new Date(r.modified).toISOString()};
+  const boundary='dg_'+crypto.randomUUID().replace(/-/g,'');
+  const body=new Blob(['--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:r.name,mimeType:'image/png',parents:[dir],appProperties:props})+'\r\n--'+boundary+'\r\nContent-Type: image/png\r\n\r\n',blob,'\r\n--'+boundary+'--\r\n']);
+  uploaded=await (await fetchApi(t,UPLOAD+'?uploadType=multipart&fields=id,name,size,modifiedTime,appProperties',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},body})).json();
+  if(!uploaded.id||uploaded.name!==r.name||Number(uploaded.size)!==blob.size)throw Error('Google Drive 未完整確認上傳');
+  // Google Drive allows duplicate names. Detect a racing upload and preserve both images.
+  const sameName=await children(t,dir,'name = '+qstr(r.name));
+  if(sameName.length>1){
+   if(parsed.legacy)throw Error('舊版雲端檔名競爭，請人工檢查');
+   const used=new Set((await children(t,dir)).map(f=>f.name));
+   let newName='';for(let serial=2;serial<=9999;serial++){
+    const candidate=slideTimeName(r.timestampMs,serial);
+    if(!used.has(candidate)&&!await read('meta',key(r.videoId,candidate))){newName=candidate;break;}
+   }
+   if(!newName)throw Error('圖片名稱衝突無法解決');
+   const change=await json(t,'/files/'+encodeURIComponent(uploaded.id)+'?fields=id,name',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:newName})});
+   if(change.id!==uploaded.id||change.name!==newName)throw Error('雲端重複檔名修復失敗');
+   r=await renamePendingRecord(r,newName);uploaded.name=newName;
+  }
+  break;
+ }
+ if(!uploaded)throw Error('無法取得唯一雲端圖片名稱');
+ await saveRecord({...r,state:'cloud',driveId:uploaded.id,modified:Date.parse(uploaded.modifiedTime)||r.modified});
+}
 async function arm(){if(await config()&&!await chrome.alarms.get('slides-sync'))await chrome.alarms.create('slides-sync',{periodInMinutes:1});}
 async function reconcileAlarm(){
  if(await pendingCount())await arm();else{await chrome.alarms.clear('slides-sync');if(await pendingCount())await arm();}
