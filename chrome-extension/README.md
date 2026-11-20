@@ -1,4 +1,4 @@
-# YouTube Slides Extractor — Chrome Extension v0.3.2 (Cloud Alpha)
+# YouTube Slides Extractor — Chrome Extension v0.3.3 (Cloud Alpha)
 
 ## 安裝與連接
 
@@ -9,6 +9,14 @@
 5. 授權後重整 YouTube，點歷史紀錄的「更新索引」。
 
 固定擴充套件 ID：kbghnfojpidgmkfmjnajikpnhgcpphan
+
+## v0.3.3
+- 成功寫入擴充套件 IndexedDB 後，立即排入 Google Drive 上傳（不必等下次一分鐘排程）。即時上傳合併請求，每次最多處理三批、每批最多五張；如有剩餘則由既有每分鐘排程繼續補傳。
+- 授權或網路失敗時，保留本機原圖，限制即時重試頻率；使用者仍可手動「立即同步」。
+- YouTube 面板與設定頁顯示最近成功上傳張數及時間，與待同步數量分開。
+- 影片標題縮為一行；預設不顯示工作階段下拉選單。如本分頁有另一部影片尚未保存在本機資料庫的截圖，顯示「切換未儲存的暫存影片」的折疊入口。
+- 固定擴充套件 ID、Google OAuth 設定、現有資料夾綁定、資料庫、截圖、快速掃描及 ZIP 格式均未變更。
+- 須覆蓋原擴充套件資料夾並在 chrome://extensions 重新載入，不可移除套件，以免清除本機未同步資料。
 
 ## v0.3.2
 - 簡化登入畫面與 Google Drive 同步儀表板，提供綁定資料夾連結、待同步數量、最近成功上傳時間、連線檢查及重新授權。
