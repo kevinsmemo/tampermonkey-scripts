@@ -1,4 +1,4 @@
-# YouTube Slides Extractor — Chrome Extension v0.3.8 (Cloud Alpha)
+# YouTube Slides Extractor — Chrome Extension v0.3.9 (Cloud Alpha)
 
 ## 安裝與連接
 
@@ -9,6 +9,13 @@
 5. 授權後重整 YouTube，點歷史紀錄的「更新索引」。
 
 固定擴充套件 ID：kbghnfojpidgmkfmjnajikpnhgcpphan
+
+## v0.3.9
+- `INDEX.md` 改成 Markdown 表格，固定欄位為日期、影片標題（連結雲端資料夾）、截圖張數、YouTube；日期獨立顯示並依影片日期倒序，避免索引更新時間打亂節目排序。`index.json` 完全不變。
+- 使用影片標題作為雲端資料夾名稱時，保留語義性標點：半形 `?` 轉全形 `？`，冒號、斜線等跨系統不適用符號轉安全全形；日期 `YYYY/MM/DD(週)` 正規化為 `YYYY-MM-DD（週）`；清理控制字元、不可見字元與重複空白。
+- 保留 Drive `appProperties.youtubeVideoId` 作為穩定辨識；對於先前直接在雲端將 ID 資料夾改為標題、卻沒有寫入隱藏 ID 的舊資料夾，先依 `index.json` 的 `folderId` 驗證存在位置，再補寫隱藏標籤，避免產生重複影片資料夾。
+- 完整修復索引時，同樣以原有的 `folderId` 對照舊索引，避免已更名但未標記的舊資料夾被忽略；遇到影片 ID 衝突立即停止，不移動或刪除 PNG。
+- 本次修改保留 Chrome Extension ID、OAuth、圖片 IndexedDB、Google Drive 既有圖片檔案與檔案 ID。已完成語法／命名／索引回退的單元模擬測試，Chrome 實機仍須驗證。
 
 ## v0.3.8
 - 裁切範圍的提示字卡改為可操作控制列，優先顯示在綠色虛線框上方；當選取框貼近視窗上緣時，退回框內上方避免被裁切。提示列與影片畫面拖曳層分開，X 按鈕不會觸發裁切拖曳。
