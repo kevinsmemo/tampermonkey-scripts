@@ -19,7 +19,7 @@ function updateFields(){$('existingFields').hidden=mode()!=='existing';}
 function draw(s){
  snapshot=s;const [label,tone]=phase(s);
  $('connectionLabel').textContent=label;$('connectionBadge').dataset.tone=tone;
- $('pending').textContent=String(s.pending??0);$('uploadedAt').textContent=formatTime(s.lastUploadedAt)||'尚無新版紀錄';
+ $('pending').textContent=String(s.pending??0);$('uploadedAt').textContent=s.lastUploadedAt?formatTime(s.lastUploadedAt)+' · '+(s.lastUploadCount||1)+' 張':'尚無新版紀錄';
  $('checkedAt').textContent=s.lastCheckedAt?'最近檢查：'+formatTime(s.lastCheckedAt):'尚未檢查連線';
  $('folderSummary').hidden=!s.connected;$('loginCard').hidden=s.connected;$('reauth').hidden=!s.connected;
  $('folderName').textContent=s.rootName||'YouTube Slides';
