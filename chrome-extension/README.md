@@ -1,4 +1,4 @@
-# YouTube Slides Extractor — Chrome Extension v0.3.9 (Cloud Alpha)
+# YouTube Slides Extractor — Chrome Extension v0.4.0 (Cloud Alpha)
 
 ## 安裝與連接
 
@@ -9,6 +9,15 @@
 5. 授權後重整 YouTube，點歷史紀錄的「更新索引」。
 
 固定擴充套件 ID：kbghnfojpidgmkfmjnajikpnhgcpphan
+
+## v0.4.0 — 純時間圖片檔名與舊圖遷移
+- 新擷取的 PNG 使用 `HH-MM-SS-mmm.png`（例：`00-02-35-770.png`），同一毫秒多張圖時使用 `_02`、`_03` 後綴。檔名只顯示影片播放時間；不含 UUID、`direct/tab`、`quick/normal`。副檔名 `.png` 保留。
+- UUID、毫秒數、截圖來源與模式、擷取時間寫入新圖片的 Google Drive `appProperties`；本機 IndexedDB 同樣保留必要 metadata。雲端檔案 ID 仍以 Google Drive 為準。
+- 現有 67 張圖片原本沒有單獨的 Drive appProperties；遷移時在各影片資料夾新增 `slides.json`，以不變的 Drive `fileId` 對應原檔名、UUID、來源、模式、影片時間及新檔名。`capturedAt` 原檔未提供，不憑空補造。
+- 舊／新兩種檔名都可讀，重新整理 Google Drive 歷史資料時會以 `driveId` 搬移本機索引與已快取的 PNG（如有），避免更名後重複計數。仍保留 `INDEX.md` 表格和 `index.json` 影片層索引。
+- 本機已存在同時間檔名時自動分配流水號；雲端上傳時發現同名不同圖片會保留兩張並嘗試後綴更名。Drive 不支援原子唯一檔名，多台裝置極端同時寫入時仍有短暫競爭可能，會以重複名稱檢查／錯誤提示停止危險覆寫。
+- 舊圖僅改名、保留原本 Google Drive 檔案 ID 與 PNG bytes，不移動或刪除；一份逐張對照表（`migration-plan.json`）存於版本備份資料夾。尚未安裝 v0.4.0 的裝置應先更新並重新整理 YouTube，避免舊版看不到新檔名。
+- 性能：圖片索引仍以本機快取與延遲讀取為主；每部影片只按需讀取對應的 `slides.json`，無需下載全部 PNG 才能還原技術資訊。保留現有 5 分鐘索引合併更新與圖片快取機制。
 
 ## v0.3.9
 - `INDEX.md` 改成 Markdown 表格，固定欄位為日期、影片標題（連結雲端資料夾）、截圖張數、YouTube；日期獨立顯示並依影片日期倒序，避免索引更新時間打亂節目排序。`index.json` 完全不變。
