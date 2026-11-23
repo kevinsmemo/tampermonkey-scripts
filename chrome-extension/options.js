@@ -19,11 +19,11 @@ function draw(s){
  $('connectionLabel').textContent=label;$('connectionBadge').dataset.tone=tone;
  $('pending').textContent=String(s.pending??0);$('uploadedAt').textContent=s.lastUploadedAt?formatTime(s.lastUploadedAt)+' · '+(s.lastUploadCount||1)+' 張':'尚無新版紀錄';
  $('checkedAt').textContent=s.lastCheckedAt?'最近檢查：'+formatTime(s.lastCheckedAt):'尚未檢查連線';
- $('folderSummary').hidden=!s.connected;$('loginCard').hidden=s.connected;$('reauth').hidden=!s.connected;$('namingCard').hidden=!s.connected;
+ $('folderSummary').hidden=!s.connected;$('loginCard').hidden=s.connected;$('reauth').hidden=!s.connected;$('logout').hidden=!s.connected;$('namingCard').hidden=!s.connected;
  $('folderName').textContent=s.rootName||'YouTube Slides';
  $('modeLabel').textContent=s.mode==='existing'?'指定資料夾 · 完整 Drive 授權':s.mode==='auto'?'自動設定 · 最小權限':'專用資料夾 · 最小權限';
  if(/^[A-Za-z0-9_-]{10,150}$/.test(s.root||'')){$('folderLink').href='https://drive.google.com/drive/folders/'+s.root;$('folderLink').hidden=false;}else{$('folderLink').removeAttribute('href');$('folderLink').hidden=true;}
- for(const id of ['sync','verify','reauth'])$(id).disabled=busy||!s.connected||s.syncing;
+ for(const id of ['sync','verify','reauth','logout'])$(id).disabled=busy||!s.connected||s.syncing;
  $('login').disabled=busy||!s.clientConfigured||s.connected;
  $('connectExisting').disabled=busy||!s.clientConfigured||s.syncing;
  $('connectExisting').textContent=s.connected?'檢查並切換至指定資料夾':'連接指定資料夾';
@@ -33,7 +33,7 @@ function draw(s){
 }
 async function display(){if(polling)return;polling=true;try{draw(await rpc('details'));}catch(e){if(!busy)message($('result'),e.message,true);}finally{polling=false;}}
 async function run(type,data){
- if(busy)return;busy=true;if(snapshot)draw(snapshot);message($('result'),type==='connect'?'等待 Google 授權…':type==='verify'?'正在檢查 Google Drive…':'正在同步…');
+ if(busy)return;busy=true;if(snapshot)draw(snapshot);message($('result'),type==='connect'?'等待 Google 授權…':type==='reauthorize'?'正在重新授權…':type==='logout'?'正在登出 Google Drive…':type==='verify'?'正在檢查 Google Drive…':'正在同步…');
  try{const s=await rpc(type,data);const d=await rpc('details');draw(d);if(type==='connect'){
    if(s.setupAction==='needsChoice'){
     $('noFolderChoices').hidden=false;
@@ -47,7 +47,7 @@ async function run(type,data){
     $('noFolderChoices').hidden=true;
     message($('result'),s.setupAction==='created'?'已建立新的 YouTube Slides 資料夾。':s.setupAction==='switched'?'已安全改連至指定的既有資料夾；原資料夾沒有被移動或刪除。':s.setupAction==='found'?'已找到可存取的 YouTube Slides 資料夾並完成連線。':'已綁定 Google Drive，回到 YouTube 即可使用。');
    }
-  }else if(type==='verify')message($('result'),'連線與資料夾檢查成功。');else message($('result'),s.syncError||s.checkError?'同步尚未完成，請查看最近錯誤。':s.pending?'已完成本次批次，剩餘 '+s.pending+' 張將繼續補傳。':'無待同步圖片。',!!(s.syncError||s.checkError));}
+  }else if(type==='logout')message($('result'),s.credentialError?'已停止雲端同步、保留本機圖片，但瀏覽器清除授權快取失敗：'+s.credentialError:'已登出 Google Drive。本機圖片及待同步資料仍保留；重新登入時可指定原資料夾。',!!s.credentialError);else if(type==='reauthorize')message($('result'),'已完成 Google 帳號重新授權及資料夾驗證。');else if(type==='verify')message($('result'),'連線與資料夾檢查成功。');else message($('result'),s.syncError||s.checkError?'同步尚未完成，請查看最近錯誤。':s.pending?'已完成本次批次，剩餘 '+s.pending+' 張將繼續補傳。':'無待同步圖片。',!!(s.syncError||s.checkError));}
  catch(e){message($('result'),e.message,true);}
  finally{busy=false;if(snapshot)draw(snapshot);await display();}
 }
@@ -62,7 +62,13 @@ $('connectExisting').onclick=()=>{
 };
 $('useVisible').onclick=()=>{const folder=$('useVisible').dataset.folder;if(folder)void run('connect',{mode:'useVisible',folder});};
 $('createNew').onclick=()=>{if(confirm('確定要建立全新的 YouTube Slides 資料夾？\n\n只有確認原本沒有使用中的資料夾時才應建立；此動作可能造成重複資料夾。'))void run('connect',{mode:'create'});};
-$('reauth').onclick=()=>{if(snapshot?.connected)void run('connect',{mode:snapshot.mode});};
+$('reauth').onclick=()=>{if(snapshot?.connected)void run('reauthorize');};
+$('logout').onclick=()=>{
+ if(!snapshot?.connected||snapshot.syncing)return;
+ const pending=snapshot.pending||0;
+ const notice='確定登出 Google Drive？\n\n登出只會停止本套件的雲端連線，不會刪除 Google Drive 檔案或此裝置保存的 PNG。'+(pending?'\n\n此裝置還有 '+pending+' 張待同步圖片；重新登入必須使用原 Google 帳號及原資料夾才能續傳。':'')+'\n\n登出後可以重新登入，或在進階設定指定原有的 YouTube Slides 資料夾。';
+ if(confirm(notice))void run('logout');
+};
 $('sync').onclick=()=>void run('syncNow');
 $('verify').onclick=()=>void run('verify');
 let namingPreview=null,namingWorking=false;
