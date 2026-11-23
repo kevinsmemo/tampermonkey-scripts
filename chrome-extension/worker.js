@@ -536,13 +536,47 @@ async function get(m){const k=key(m.videoId,m.name),r=await read('meta',k);if(!r
 async function index(){return cloudIndex(false,false);}
 async function indexQuick(){return cloudIndex(false,true);}
 async function rebuildIndex(){return cloudIndex(true,false);}
-async function connect(m){const current=await config(),mode=m.mode==='existing'?'existing':'new',scope=mode==='existing'?ALL_SCOPE:FILE_SCOPE,t=await token(scope,true),who=await owner(t);
- if(current){if(current.owner!==who||current.mode!==mode)throw Error('此安裝已綁定另一帳號／模式；不會轉送現有離線資料');await checkRoot(t,current);await updateHealth({lastCheckedAt:Date.now(),checkError:''});return state();}
- let root,rootName;
- if(mode==='existing'){const raw=String(m.folder||'').trim(),id=raw.match(/\/folders\/([A-Za-z0-9_-]+)/)?.[1]||raw;if(!/^[A-Za-z0-9_-]{10,150}$/.test(id))throw Error('請輸入 YouTube Slides 資料夾網址或 ID');
- const r=await json(t,'/files/'+encodeURIComponent(id)+'?fields=id,name,mimeType,trashed');if(r.trashed||r.mimeType!==FOLDER||r.name!=='YouTube Slides')throw Error('僅接受名稱正確的 YouTube Slides 資料夾');root=r.id;rootName=r.name;
- }else{rootName='YouTube Slides - API';root=await folder(t,'root',rootName,true);}
- await chrome.storage.local.set({config:{root,rootName,mode,scope,owner:who}});await updateHealth({lastCheckedAt:Date.now(),checkError:''});return state();}
+async function discoverDefaultRoot(t){
+ // drive.file only sees files created or explicitly opened through this app.
+ // Searching all accessible folders (not just My Drive root) avoids duplicates
+ // for returning users whose existing folder was moved to another location.
+ const byName=await list(t,'mimeType = '+qstr(FOLDER)+' and (name = '+qstr('YouTube Slides')+' or name = '+qstr('YouTube Slides - API')+')');
+ if(byName.length>1)throw Error('找到多個可存取的 YouTube Slides 資料夾，為避免誤綁，請使用進階設定指定資料夾。');
+ if(byName.length===1)return {root:byName[0].id,rootName:byName[0].name,created:false};
+ return null;
+}
+async function connect(m){
+ const current=await config(),mode=m.mode==='existing'?'existing':m.mode==='new'?'new':'auto',scope=mode==='existing'?ALL_SCOPE:FILE_SCOPE;
+ // Keep prior installations tied to the original account and folder.
+ // An interactive sign-in can refresh, but never silently switch ownership.
+ if(current&&mode!==current.mode)throw Error('此安裝已綁定資料夾；重新授權請使用上方按鈕，不能改用其他模式覆寫現有設定。');
+ const t=await token(scope,true),who=await owner(t);
+ if(current){if(current.owner!==who)throw Error('此安裝已綁定另一帳號；不會轉送現有離線資料');await checkRoot(t,current);await updateHealth({lastCheckedAt:Date.now(),checkError:''});return {...await state(),setupAction:'unchanged'};}
+ let root,rootName,setupAction='found';
+ if(mode==='existing'){
+  const raw=String(m.folder||'').trim(),id=raw.match(/\/folders\/([A-Za-z0-9_-]+)/)?.[1]||raw;
+  if(!/^[A-Za-z0-9_-]{10,150}$/.test(id))throw Error('請輸入 Google Drive 資料夾網址或 ID');
+  const r=await json(t,'/files/'+encodeURIComponent(id)+'?fields=id,name,mimeType,trashed');
+  if(r.trashed||r.mimeType!==FOLDER||!r.id)throw Error('指定的 Google Drive 資料夾不存在或無法存取');
+  root=r.id;rootName=r.name;
+ }else if(mode==='new'){
+  // Backward-compatible reauthentication path for original v0.3.x installs.
+  rootName='YouTube Slides - API';root=await folder(t,'root',rootName,true);
+ }else{
+  const found=await discoverDefaultRoot(t);
+  if(found){root=found.root;rootName=found.rootName;}
+  else{
+   // Files hidden by drive.file are not discoverable. Users with a manually
+   // created legacy folder can explicitly select it with advanced permissions.
+   rootName='YouTube Slides';root=await folder(t,'root',rootName,true);setupAction='created';
+  }
+ }
+ if(!root)throw Error('無法確認 Google Drive 資料夾，尚未儲存連線設定');
+ await checkRoot(t,{root,rootName});
+ await chrome.storage.local.set({config:{root,rootName,mode,scope,owner:who}});
+ await updateHealth({lastCheckedAt:Date.now(),checkError:''});
+ return {...await state(),setupAction,root,rootName};
+}
 async function renamePendingRecord(r,name){
  if(name===r.name)return r;
  if(await read('meta',key(r.videoId,name)))throw Error('目標檔名已存在於本機');
