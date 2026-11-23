@@ -537,46 +537,97 @@ async function index(){return cloudIndex(false,false);}
 async function indexQuick(){return cloudIndex(false,true);}
 async function rebuildIndex(){return cloudIndex(true,false);}
 async function discoverDefaultRoot(t){
- // drive.file only sees files created or explicitly opened through this app.
- // Searching all accessible folders (not just My Drive root) avoids duplicates
- // for returning users whose existing folder was moved to another location.
+ // drive.file never proves that an unseen folder does not exist. Do not infer
+ // missing == absent and never create a duplicate based on this result.
  const byName=await list(t,'mimeType = '+qstr(FOLDER)+' and (name = '+qstr('YouTube Slides')+' or name = '+qstr('YouTube Slides - API')+')');
- if(byName.length>1)throw Error('找到多個可存取的 YouTube Slides 資料夾，為避免誤綁，請使用進階設定指定資料夾。');
- if(byName.length===1)return {root:byName[0].id,rootName:byName[0].name,created:false};
+ if(byName.length>1)throw Error('找到多個可存取的 YouTube Slides 資料夾，請在進階設定指定正確的資料夾，避免誤綁。');
+ if(byName.length===1){
+  const candidate=byName[0];
+  // A visible but empty app-created folder may be the new duplicate rather than
+  // the manually created original hidden by drive.file. Ask instead of guessing.
+  const contents=await children(t,candidate.id);
+  if(!contents.length)return {emptyCandidate:candidate};
+  return {root:candidate.id,rootName:candidate.name};
+ }
  return null;
 }
 async function connect(m){
- const current=await config(),mode=m.mode==='existing'?'existing':m.mode==='new'?'new':'auto',scope=mode==='existing'?ALL_SCOPE:FILE_SCOPE;
- // Keep prior installations tied to the original account and folder.
- // An interactive sign-in can refresh, but never silently switch ownership.
- if(current&&mode!==current.mode)throw Error('此安裝已綁定資料夾；重新授權請使用上方按鈕，不能改用其他模式覆寫現有設定。');
+ const current=await config();
+ const action=m.mode==='existing'?'existing':m.mode==='create'?'create':m.mode==='useVisible'?'useVisible':m.mode==='new'?'legacyNew':'auto';
+ const mode=action==='existing'?'existing':action==='legacyNew'?'new':'auto';
+ const scope=action==='existing'?ALL_SCOPE:FILE_SCOPE;
+ // Only an explicit existing-folder action can rebind a previous installation.
+ if(current&&action!=='existing'&&mode!==current.mode)throw Error('已綁定資料夾；重新授權請使用上方按鈕，不能以其他模式覆寫現有設定。');
+ if(current&&action==='create')throw Error('已有資料夾綁定，無法建立新資料夾。請先確認現有設定。');
  const t=await token(scope,true),who=await owner(t);
- if(current){if(current.owner!==who)throw Error('此安裝已綁定另一帳號；不會轉送現有離線資料');await checkRoot(t,current);await updateHealth({lastCheckedAt:Date.now(),checkError:''});return {...await state(),setupAction:'unchanged'};}
+ if(current&&current.owner!==who)throw Error('此安裝已綁定另一個 Google 帳號；不會將本機圖片轉送到其他帳號。');
+ if(current&&action!=='existing'){
+  await checkRoot(t,current);
+  await updateHealth({lastCheckedAt:Date.now(),checkError:''});
+  return {...await state(),setupAction:'unchanged'};
+ }
  let root,rootName,setupAction='found';
- if(mode==='existing'){
+ if(action==='existing'){
   const raw=String(m.folder||'').trim(),id=raw.match(/\/folders\/([A-Za-z0-9_-]+)/)?.[1]||raw;
   if(!/^[A-Za-z0-9_-]{10,150}$/.test(id))throw Error('請輸入 Google Drive 資料夾網址或 ID');
   const r=await json(t,'/files/'+encodeURIComponent(id)+'?fields=id,name,mimeType,trashed');
   if(r.trashed||r.mimeType!==FOLDER||!r.id)throw Error('指定的 Google Drive 資料夾不存在或無法存取');
   root=r.id;rootName=r.name;
- }else if(mode==='new'){
-  // Backward-compatible reauthentication path for original v0.3.x installs.
-  rootName='YouTube Slides - API';root=await folder(t,'root',rootName,true);
+  if(current&&root!==current.root){
+   if(!m.replaceExisting)throw Error('切換資料夾需要明確確認，原本的圖片不會自動合併。');
+   if(syncRunning)throw Error('目前正在同步，請待同步結束後再切換。');
+   const pending=await pendingCount();
+   if(pending)throw Error('此裝置尚有 '+pending+' 張圖片待同步；為避免遺失或誤傳，尚不能切換。');
+   await checkRoot(t,current);
+   const sourceContents=await children(t,current.root);
+   if(sourceContents.length)throw Error('目前綁定的資料夾不是空的，尚不能自動切換；請先檢查兩邊資料並決定如何合併。');
+   const dirty=(await chrome.storage.local.get('indexDirtyIds')).indexDirtyIds||[];
+   if(Array.isArray(dirty)&&dirty.length)throw Error('原資料夾仍有尚未完成的索引更新，請先完成同步。');
+   setupAction='switched';
+  }else if(current){
+   await checkRoot(t,current);
+   await updateHealth({lastCheckedAt:Date.now(),checkError:''});
+   return {...await state(),setupAction:'unchanged'};
+  }
+ }else if(action==='legacyNew'){
+  // Reauthorization for v0.3.x is handled above; do not automatically create a
+  // legacy folder on first connection.
+  throw Error('舊版專用模式已停用，請改用自動尋找或指定既有資料夾。');
+ }else if(action==='useVisible'){
+  // A user can explicitly accept an empty candidate without requesting full
+  // Drive access. The candidate must be rediscovered and verified first.
+  const found=await discoverDefaultRoot(t);
+  if(!found?.emptyCandidate||found.emptyCandidate.id!==m.folder)throw Error('選擇的空白資料夾已變更，請重新檢查 Google Drive。');
+  root=found.emptyCandidate.id;rootName=found.emptyCandidate.name;
+ }else if(action==='create'){
+  // A create action must be initiated separately from the sign-in/find button.
+  const found=await discoverDefaultRoot(t);
+  if(found?.root)throw Error('已找到可存取的 YouTube Slides 資料夾，請先使用現有資料夾。');
+  if(found?.emptyCandidate)throw Error('已找到一個空白的 YouTube Slides 資料夾，請確認後使用它，避免再次建立重複資料夾。');
+  rootName='YouTube Slides';
+  const created=await json(t,'/files?fields=id,name,mimeType',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:rootName,mimeType:FOLDER,parents:['root']})});
+  if(!created.id||created.name!==rootName||created.mimeType!==FOLDER)throw Error('新資料夾建立後驗證失敗，請檢查 Google Drive。');
+  root=created.id;setupAction='created';
  }else{
   const found=await discoverDefaultRoot(t);
-  if(found){root=found.root;rootName=found.rootName;}
+  if(found?.root){root=found.root;rootName=found.rootName;}
   else{
-   // Files hidden by drive.file are not discoverable. Users with a manually
-   // created legacy folder can explicitly select it with advanced permissions.
-   rootName='YouTube Slides';root=await folder(t,'root',rootName,true);setupAction='created';
+   // No configuration is stored and no Drive folder is created. The user has
+   // to explicitly choose the original folder or authorize creating a new one.
+   return {...await state(),setupAction:'needsChoice',emptyCandidate:found?.emptyCandidate?.id||''};
   }
  }
  if(!root)throw Error('無法確認 Google Drive 資料夾，尚未儲存連線設定');
  await checkRoot(t,{root,rootName});
  await chrome.storage.local.set({config:{root,rootName,mode,scope,owner:who}});
+ if(setupAction==='switched'){
+  videoDirCache.clear();
+  await chrome.storage.local.remove(['indexCache','indexCheckedAt']);
+ }
  await updateHealth({lastCheckedAt:Date.now(),checkError:''});
  return {...await state(),setupAction,root,rootName};
 }
+
 async function renamePendingRecord(r,name){
  if(name===r.name)return r;
  if(await read('meta',key(r.videoId,name)))throw Error('目標檔名已存在於本機');
