@@ -104,7 +104,17 @@ async function auth(c){if(!c)throw Error('尚未連接 Google Drive');const t=aw
 async function list(t,q){let out=[],page;do{const p=new URLSearchParams({q:"trashed = false and ("+q+")",fields:'nextPageToken,files(id,name,mimeType,size,modifiedTime,parents,trashed,appProperties)',pageSize:'1000',spaces:'drive'});if(page)p.set('pageToken',page);const r=await json(t,'/files?'+p);out.push(...(r.files||[]));page=r.nextPageToken;}while(page);return out;}
 async function children(t,parent,extra){return list(t,qstr(parent)+' in parents'+(extra?' and '+extra:''));}
 async function folder(t,parent,name,create=false){const matches=await children(t,parent,"mimeType = "+qstr(FOLDER)+" and name = "+qstr(name));if(matches.length>1)throw Error('重複資料夾 '+name+'；請至 Drive 整理');if(matches[0])return matches[0].id;if(!create)return null;const f=await json(t,'/files?fields=id,name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,mimeType:FOLDER,parents:[parent]})});return f.id;}
-async function checkRoot(t,c){const f=await json(t,'/files/'+encodeURIComponent(c.root)+'?fields=id,name,mimeType,trashed');if(f.trashed||f.mimeType!==FOLDER||f.name!==c.rootName)throw Error('指定資料夾名稱已變更或不存在，停止同步');}
+async function checkRoot(t,c){
+ const f=await json(t,'/files/'+encodeURIComponent(c.root)+'?fields=id,name,mimeType,trashed');
+ if(f.id!==c.root||f.trashed||f.mimeType!==FOLDER||typeof f.name!=='string'||!f.name)throw Error('指定資料夾已無法存取或不是資料夾，停止同步');
+ // Drive folder IDs, not user-editable names, identify the connection.
+ if(f.name!==c.rootName){
+  const installed=await config();
+  if(installed?.root===c.root&&installed.owner===c.owner)
+   await chrome.storage.local.set({config:{...installed,rootName:f.name}});
+ }
+ return f;
+}
 // Human-readable folders use private Drive metadata as their stable identity.
 function cleanVideoTitle(title,vid){
  // Preserve meaningful punctuation, while making file names safe for Windows/macOS sync.
@@ -456,7 +466,7 @@ async function syncCloudIndex(){
  if(!ids.length){await chrome.alarms.clear('slides-index');return;}
  if(Date.now()+1000<indexDueAt(current)){await armDirtyIndex(current);return;}
  try{
-   const c=await config();if(!c){await armDirtyIndex({...current,retryAt:Date.now()+INDEX_RETRY});return;}
+   const c=await config();if(!c){await chrome.alarms.clear('slides-index');return;}
    const t=await auth(c);await checkRoot(t,c);
    let snapshot=await loadRootIndex(t,c);
    if(!snapshot)snapshot=await scanRootIndex(t,c);
@@ -536,6 +546,36 @@ async function get(m){const k=key(m.videoId,m.name),r=await read('meta',k);if(!r
 async function index(){return cloudIndex(false,false);}
 async function indexQuick(){return cloudIndex(false,true);}
 async function rebuildIndex(){return cloudIndex(true,false);}
+// Suspend cloud-specific work on logout, without deleting locally captured PNGs.
+const CLOUD_DIRTY_KEYS=['indexDirtyIds','indexDirtyFirstAt','indexDirtyLastAt','indexRetryAt'];
+async function reauthorize(){
+ const c=await config();if(!c)throw Error('尚未綁定 Google Drive；請先登入。');
+ // This must not try to run 'connect(existing)' without its required folder URL.
+ await chrome.identity.clearAllCachedAuthTokens();
+ const t=await token(c.scope,true);
+ if(await owner(t)!==c.owner)throw Error('重新授權的 Google 帳號與既有資料不同。請登出後選擇正確的帳號。');
+ await checkRoot(t,c);
+ await updateHealth({checkError:'',syncError:'',lastCheckedAt:Date.now()});
+ return {...await state(),reauthorized:true};
+}
+async function disconnect(){
+ if(syncRunning)throw Error('圖片仍在同步，請待本批次結束後再登出。');
+ const old=await config(),pending=await pendingCount();
+ const dirty=await chrome.storage.local.get(CLOUD_DIRTY_KEYS);
+ if(old)await chrome.storage.local.set({previousDriveConnection:{
+  owner:old.owner,root:old.root,rootName:old.rootName,mode:old.mode,scope:old.scope,
+  dirty,disconnectedAt:Date.now()
+ }});
+ let credentialError='';
+ try{await chrome.identity.clearAllCachedAuthTokens();}
+ catch(e){credentialError=String(e?.message||e).slice(0,150);}
+ await chrome.storage.local.remove(['config',...CLOUD_DIRTY_KEYS,'indexCache','indexCheckedAt']);
+ await chrome.alarms.clear('slides-sync');await chrome.alarms.clear('slides-index');
+ videoDirCache.clear();automaticRetryAfter=0;
+ await updateHealth({checkError:'',syncError:'',indexError:'',lastCheckedAt:0});
+ await chrome.storage.local.set({lastSync:''});
+ return {...await state(),signedOut:true,credentialError,pending};
+}
 async function discoverDefaultRoot(t){
  // drive.file never proves that an unseen folder does not exist. Do not infer
  // missing == absent and never create a duplicate based on this result.
@@ -553,6 +593,7 @@ async function discoverDefaultRoot(t){
 }
 async function connect(m){
  const current=await config();
+ const prior=(await chrome.storage.local.get('previousDriveConnection')).previousDriveConnection||null;
  const action=m.mode==='existing'?'existing':m.mode==='create'?'create':m.mode==='useVisible'?'useVisible':m.mode==='new'?'legacyNew':'auto';
  const mode=action==='existing'?'existing':action==='legacyNew'?'new':'auto';
  const scope=action==='existing'?ALL_SCOPE:FILE_SCOPE;
@@ -561,6 +602,8 @@ async function connect(m){
  if(current&&action==='create')throw Error('已有資料夾綁定，無法建立新資料夾。請先確認現有設定。');
  const t=await token(scope,true),who=await owner(t);
  if(current&&current.owner!==who)throw Error('此安裝已綁定另一個 Google 帳號；不會將本機圖片轉送到其他帳號。');
+ if(!current&&prior&&prior.owner!==who&&await pendingCount())
+  throw Error('本機仍有前一個 Google 帳號的待上傳圖片。請重新登入原帳號，避免將圖片傳到其他人的 Drive。');
  if(current&&action!=='existing'){
   await checkRoot(t,current);
   await updateHealth({lastCheckedAt:Date.now(),checkError:''});
@@ -618,13 +661,22 @@ async function connect(m){
   }
  }
  if(!root)throw Error('無法確認 Google Drive 資料夾，尚未儲存連線設定');
+ // Never transfer pending PNGs to a different folder, even if it is owned by the
+ // same account. A disconnected binding remembers where the pending files belong.
+ const samePrior=!current&&prior&&prior.owner===who&&prior.root===root;
+ if(!current&&prior&&!samePrior&&await pendingCount())
+  throw Error('本機有前一個資料夾的待上傳圖片。請重新連回原資料夾完成同步，避免誤傳圖片。');
  await checkRoot(t,{root,rootName});
  await chrome.storage.local.set({config:{root,rootName,mode,scope,owner:who}});
- if(setupAction==='switched'){
+ if((current&&setupAction==='switched')||(!current&&prior)){
   videoDirCache.clear();
   await chrome.storage.local.remove(['indexCache','indexCheckedAt']);
  }
- await updateHealth({lastCheckedAt:Date.now(),checkError:''});
+ if(!current&&samePrior&&prior.dirty&&typeof prior.dirty==='object'){
+  const restore={};for(const key of CLOUD_DIRTY_KEYS)if(Object.hasOwn(prior.dirty,key))restore[key]=prior.dirty[key];
+  if(Object.keys(restore).length)await chrome.storage.local.set(restore);
+ }
+ await updateHealth({lastCheckedAt:Date.now(),checkError:'',syncError:'',indexError:''});
  return {...await state(),setupAction,root,rootName};
 }
 
@@ -687,7 +739,7 @@ async function uploadOne(t,c,record){
 }
 async function arm(){if(await config()&&!await chrome.alarms.get('slides-sync'))await chrome.alarms.create('slides-sync',{periodInMinutes:1});}
 async function reconcileAlarm(){
- if(await pendingCount())await arm();else{await chrome.alarms.clear('slides-sync');if(await pendingCount())await arm();}
+ if(await config()&&await pendingCount())await arm();else{await chrome.alarms.clear('slides-sync');if(await config()&&await pendingCount())await arm();}
 }
 async function flush(checkWhenEmpty=false){
  const c=await config();if(!c)return state();
@@ -728,13 +780,13 @@ function requestImmediateSync(){
 chrome.alarms.onAlarm.addListener(a=>{if(a.name==='slides-sync')void queue(flush).catch(()=>{});if(a.name==='slides-index')void queue(syncCloudIndex).catch(()=>{});});
 const resumePending=()=>void queue(async()=>{
  const pending=await records('state','pending');
- if(pending.length){
+ if(pending.length&&await config()){
    await arm();
    // A previous process may have stopped after persisting a PNG or after a Drive upload.
    await markIndexDirty(new Set(pending.map(r=>r.videoId)),false);
  }
  const dirty=dirtyIndexState(await chrome.storage.local.get(['indexDirtyIds','indexDirtyFirstAt','indexDirtyLastAt','indexRetryAt']));
- await armDirtyIndex(dirty);
+ if(await config())await armDirtyIndex(dirty);
 }).catch(()=>{});
 chrome.runtime.onStartup.addListener(resumePending);
 chrome.runtime.onInstalled.addListener(resumePending);
@@ -742,7 +794,7 @@ chrome.action.onClicked.addListener(()=>void chrome.runtime.openOptionsPage());
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  if(sender.id!==chrome.runtime.id||!m||typeof m.type!=='string')return false;
  const options=sender.url===chrome.runtime.getURL('options.html'),yt=/^https:\/\/(?:www|m)\.youtube\.com\//.test(sender.url||'');
- if(!options&&!yt)return false;if(['connect','syncNow','details','verify','previewNames','migrateNames','rebuildIndex'].includes(m.type)&&!options)return false;
+ if(!options&&!yt)return false;if(['connect','logout','reauthorize','syncNow','details','verify','previewNames','migrateNames','rebuildIndex'].includes(m.type)&&!options)return false;
  if(['put','get','list'].includes(m.type)&&(!ID.test(m.videoId||'')||(['put','get'].includes(m.type)&&!NAME.test(m.name||'')))){reply({ok:false,error:'Invalid video or filename'});return false;}
  (async()=>{let data;switch(m.type){
  case 'status':data=await state();break;
@@ -751,7 +803,9 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  case 'previewNames':data=await queue(previewNames);break;
  case 'migrateNames':data=await queue(()=>migrateNames(m));break;
  case 'options':await chrome.runtime.openOptionsPage();data=true;break;
- case 'connect':data=await queue(()=>connect(m));await arm();void queue(flush).catch(()=>{});break;
+ case 'connect':data=await queue(()=>connect(m));await arm();await armDirtyIndex(dirtyIndexState(await chrome.storage.local.get(CLOUD_DIRTY_KEYS)));void queue(flush).catch(()=>{});break;
+ case 'logout':data=await queue(disconnect);break;
+ case 'reauthorize':data=await queue(reauthorize);break;
  case 'put':data=await queueWrite(()=>put(m));try{await arm();}catch(_){}requestImmediateSync();break;
  case 'list':data=await queue(()=>catalog(m.videoId));break;
  case 'get':data=await queue(()=>get(m));break;
