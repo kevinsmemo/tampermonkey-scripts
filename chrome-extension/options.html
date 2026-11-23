@@ -11,7 +11,7 @@
 <div class="row spread"><h2 id="syncHeading" style="margin:0">Google Drive 同步</h2><span class="badge" id="connectionBadge" role="status"><span class="dot"></span><span id="connectionLabel">讀取中…</span></span></div>
 <div class="metrics"><div class="metric"><div class="muted">待同步圖片（此裝置）</div><div class="number" id="pending">—</div><small>成功上傳後自動減少</small></div><div class="metric"><div class="muted">最近成功上傳</div><div class="time" id="uploadedAt">尚無紀錄</div><small id="checkedAt">尚未檢查連線</small></div></div>
 <div class="folder" id="folderSummary" hidden><div class="muted">已綁定的資料夾</div><div class="row spread"><strong id="folderName">—</strong><a id="folderLink" target="_blank" rel="noopener noreferrer">在 Google Drive 開啟 ↗</a></div><div class="muted" id="modeLabel"></div></div>
-<div class="row"><button class="primary" id="sync" disabled>立即同步</button><button id="verify" disabled>檢查連線</button><button id="reauth" hidden disabled>重新授權</button></div>
+<div class="row"><button class="primary" id="sync" disabled>立即同步</button><button id="verify" disabled>檢查連線</button><button id="reauth" hidden disabled>重新授權</button><button id="logout" hidden disabled title="清除本套件的 Google 授權與連線；不刪除圖片">登出 Google</button></div>
 <div class="message" id="result" role="status"></div><div class="message" id="health" role="status"></div>
 </section>
 <section class="card" id="loginCard" hidden>
