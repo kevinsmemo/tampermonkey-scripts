@@ -14,8 +14,6 @@ function phase(s){
  return s.lastCheckedAt?['已綁定 · 無待傳','good']:['已綁定 · 待檢查','neutral'];
 }
 function message(el,text,error=false){el.textContent=text||'';el.dataset.error=String(error);}
-function mode(){return document.querySelector('input[name="mode"]:checked').value;}
-function updateFields(){$('existingFields').hidden=mode()!=='existing';}
 function draw(s){
  snapshot=s;const [label,tone]=phase(s);
  $('connectionLabel').textContent=label;$('connectionBadge').dataset.tone=tone;
@@ -23,21 +21,27 @@ function draw(s){
  $('checkedAt').textContent=s.lastCheckedAt?'最近檢查：'+formatTime(s.lastCheckedAt):'尚未檢查連線';
  $('folderSummary').hidden=!s.connected;$('loginCard').hidden=s.connected;$('reauth').hidden=!s.connected;$('namingCard').hidden=!s.connected;
  $('folderName').textContent=s.rootName||'YouTube Slides';
- $('modeLabel').textContent=s.mode==='existing'?'既有資料夾 · 完整 Drive 授權':'專用資料夾 · 最小權限';
+ $('modeLabel').textContent=s.mode==='existing'?'指定資料夾 · 完整 Drive 授權':s.mode==='auto'?'自動設定 · 最小權限':'專用資料夾 · 最小權限';
  if(/^[A-Za-z0-9_-]{10,150}$/.test(s.root||'')){$('folderLink').href='https://drive.google.com/drive/folders/'+s.root;$('folderLink').hidden=false;}else{$('folderLink').removeAttribute('href');$('folderLink').hidden=true;}
  for(const id of ['sync','verify','reauth'])$(id).disabled=busy||!s.connected||s.syncing;
  $('login').disabled=busy||!s.clientConfigured||s.connected;
+ $('connectExisting').disabled=busy||!s.clientConfigured||s.connected;
  message($('health'),s.checkError||s.syncError?('最近錯誤：'+[s.checkError,s.syncError].filter((v,i,a)=>v&&a.indexOf(v)===i).join('；')+'。已寫入本機的圖片會保留，請檢查連線或重新授權。'):s.lastSync||'',!!(s.checkError||s.syncError));
 }
 async function display(){if(polling)return;polling=true;try{draw(await rpc('details'));}catch(e){if(!busy)message($('result'),e.message,true);}finally{polling=false;}}
 async function run(type,data){
  if(busy)return;busy=true;if(snapshot)draw(snapshot);message($('result'),type==='connect'?'等待 Google 授權…':type==='verify'?'正在檢查 Google Drive…':'正在同步…');
- try{const s=await rpc(type,data);const d=await rpc('details');draw(d);if(type==='connect')message($('result'),'已綁定 Google Drive，回到 YouTube 即可使用。');else if(type==='verify')message($('result'),'連線與資料夾檢查成功。');else message($('result'),s.syncError||s.checkError?'同步尚未完成，請查看最近錯誤。':s.pending?'已完成本次批次，剩餘 '+s.pending+' 張將繼續補傳。':'無待同步圖片。',!!(s.syncError||s.checkError));}
+ try{const s=await rpc(type,data);const d=await rpc('details');draw(d);if(type==='connect')message($('result'),s.setupAction==='created'?'已建立 YouTube Slides 資料夾並完成連線。':s.setupAction==='found'?'已找到可存取的 YouTube Slides 資料夾並完成連線。':'已綁定 Google Drive，回到 YouTube 即可使用。');else if(type==='verify')message($('result'),'連線與資料夾檢查成功。');else message($('result'),s.syncError||s.checkError?'同步尚未完成，請查看最近錯誤。':s.pending?'已完成本次批次，剩餘 '+s.pending+' 張將繼續補傳。':'無待同步圖片。',!!(s.syncError||s.checkError));}
  catch(e){message($('result'),e.message,true);}
  finally{busy=false;if(snapshot)draw(snapshot);await display();}
 }
-for(const el of document.querySelectorAll('input[name="mode"]'))el.addEventListener('change',updateFields);
-$('login').onclick=()=>{const m=mode();if(m==='existing'&&(!$('confirm').checked||!$('folder').value.trim())){message($('result'),'請填寫資料夾網址並確認授權。',true);return;}void run('connect',{mode:m,folder:$('folder').value.trim()});};
+$('login').onclick=()=>void run('connect',{mode:'auto'});
+$('connectExisting').onclick=()=>{
+ if(!$('confirm').checked||!$('folder').value.trim()){
+  message($('result'),'請先填入資料夾網址並確認完整 Drive 授權。',true);return;
+ }
+ void run('connect',{mode:'existing',folder:$('folder').value.trim()});
+};
 $('reauth').onclick=()=>{if(snapshot?.connected)void run('connect',{mode:snapshot.mode});};
 $('sync').onclick=()=>void run('syncNow');
 $('verify').onclick=()=>void run('verify');
@@ -95,6 +99,6 @@ $('checkUpdate').onclick=async()=>{
  }catch(e){message($('updateResult'),'檢查失敗：'+e.message,true);}
  finally{updateBusy=false;$('checkUpdate').disabled=false;}
 };
-updateFields();void display();namingButtons();
+void display();namingButtons();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)void display();});
 setInterval(()=>{if(!document.hidden)void display();},5000);
