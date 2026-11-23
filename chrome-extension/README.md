@@ -1,4 +1,4 @@
-# YouTube Slides Extractor — Chrome Extension v0.4.0 (Cloud Alpha)
+# YouTube Slides Extractor — Chrome Extension v0.4.1 (Cloud Alpha)
 
 ## 安裝與連接
 
@@ -9,6 +9,19 @@
 5. 授權後重整 YouTube，點歷史紀錄的「更新索引」。
 
 固定擴充套件 ID：kbghnfojpidgmkfmjnajikpnhgcpphan
+
+## v0.4.1 — 純時間檔名碰撞狀態修正
+- 修正同一毫秒擷取不同圖片、背景程式回傳 `_02`／`_03` 等新名稱後，前端仍在 `diskNames` 集合中保留未採用檔名的問題。
+- 更新前端保存狀態與實際儲存檔名一致，不刪除另一張圖片已佔用的原檔名。
+- 不修改舊圖、Drive 檔案 ID、`slides.json`、OAuth 或存放結構。v0.4.0 的 67 張舊圖遷移已逐筆驗證。
+
+## v0.4.2 — 全站 Google Drive 入口與登入後自動設定
+- YouTube 頻道首頁、影片頁、歷史紀錄等所有 YouTube 頁面皆在面板頂部保留「Google Drive 設定」，不需切回「目前影片」才可開啟連線設定。
+- 初次登入預設先使用 `drive.file` 搜尋本應用可存取的「YouTube Slides」資料夾（相容舊名「YouTube Slides - API」）；只有查無可存取資料夾時才建立同名新資料夾；若有多個候選則停止並提示進階指定，避免誤連。
+- 進階設定才顯示「手動指定既有資料夾」及完整 Drive 授權確認。支援 Google Drive 任意有效資料夾名稱，不再強制只能命名 YouTube Slides。
+- 限制：`drive.file` 無法搜尋使用者所有手動建立的資料夾；未經此應用授權的既有資料夾可能被視為不可見。若希望沿用舊資料夾，必須在進階設定明確指定其網址並同意額外權限。
+- 既有安裝的 `config`、雲端圖片與本機 IndexedDB 都不自動換綁或清除；保持原本 Google OAuth client、擴充套件 ID、同步與截圖流程。
+- 靜態與模擬測試已完成；實際 Chrome OAuth、Google Drive 雲端端對端驗證仍需在使用者裝置上進行。
 
 ## v0.4.0 — 純時間圖片檔名與舊圖遷移
 - 新擷取的 PNG 使用 `HH-MM-SS-mmm.png`（例：`00-02-35-770.png`），同一毫秒多張圖時使用 `_02`、`_03` 後綴。檔名只顯示影片播放時間；不含 UUID、`direct/tab`、`quick/normal`。副檔名 `.png` 保留。
