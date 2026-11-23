@@ -16,19 +16,21 @@
 </section>
 <section class="card" id="loginCard" hidden>
 <h2>連接 Google Drive</h2>
-<p class="muted">登入後會先尋找此擴充套件可存取的「YouTube Slides」資料夾（含舊版「YouTube Slides - API」）；若不存在，將在你的雲端硬碟自動建立「YouTube Slides」。</p>
-<p><button class="primary full" id="login" disabled>使用 Google 帳號登入並自動設定</button></p>
-<p class="muted">預設只要求 <code>drive.file</code> 權限，不會掃描所有私人檔案。既有資料夾如果不是由本套件建立，可能無法自動找到；可在下方指定。</p>
-<details id="advancedSetup" class="folder">
-<summary>進階設定：手動指定既有資料夾</summary>
-<p class="muted">如果你已經有使用中的 YouTube Slides 資料夾，且自動搜尋無法辨識，請貼上資料夾網址。此相容模式會額外要求完整 Google Drive 權限。</p>
+<p class="muted">登入後會先尋找本套件有權存取的「YouTube Slides」資料夾。如果搜尋不到，會請你確認要連接既有資料夾，或明確選擇建立新的；不會擅自建立。</p>
+<p><button class="primary full" id="login" disabled>使用 Google 帳號登入並尋找資料夾</button></p>
+<p class="muted">預設使用 <code>drive.file</code> 最小權限。搜尋不到不代表資料夾不存在；若原本已建立，請在進階設定貼上原資料夾網址。</p>
+<div id="noFolderChoices" hidden><p class="message" id="noFolderMessage">目前無法確認是否已有 YouTube Slides 資料夾。若原本有資料，請優先連接既有資料夾。</p><button id="useVisible" type="button" hidden>使用找到的空白資料夾（不建立新的）</button> <button id="createNew" type="button">我確認要建立全新的 YouTube Slides 資料夾</button></div>
+
+<p class="muted">Google 登入是選用功能；不登入仍可離線擷取與匯出 ZIP。本套件不會將圖片傳送到開發者的帳號。</p>
+</section>
+<section class="card" id="advancedCard"><details id="advancedSetup" class="folder">
+<summary>進階設定：連接或切換既有資料夾</summary>
+<p class="muted">如果你已經有使用中的資料夾，請貼上原始網址。這個功能也可將「誤連到新空白資料夾」的裝置改回原資料夾；前提是沒有待同步圖片，且目前資料夾為空。此模式需要完整 Drive 授權。</p>
 <label for="folder">指定 Google Drive 資料夾網址或 ID</label>
 <input class="field" id="folder" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off">
 <label class="row"><input type="checkbox" id="confirm">我確認需要存取既有資料夾，並同意完整 Drive 授權。</label>
 <p><button id="connectExisting" disabled>連接指定資料夾</button></p>
-</details>
-<p class="muted">Google 登入是選用功能；不登入仍可離線擷取與匯出 ZIP。本套件不會將圖片傳送到開發者的帳號。</p>
-</section>
+</details></section>
 <section class="card" id="namingCard" hidden>
 <h2>影片資料夾命名</h2>
 <p class="muted">新影片資料夾僅顯示標題，YouTube 影片 ID 存在 Google Drive 應用程式專用中繼資料。既有的 ID 資料夾不會自動變動。</p>
