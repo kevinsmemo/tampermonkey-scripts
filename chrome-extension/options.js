@@ -25,13 +25,29 @@ function draw(s){
  if(/^[A-Za-z0-9_-]{10,150}$/.test(s.root||'')){$('folderLink').href='https://drive.google.com/drive/folders/'+s.root;$('folderLink').hidden=false;}else{$('folderLink').removeAttribute('href');$('folderLink').hidden=true;}
  for(const id of ['sync','verify','reauth'])$(id).disabled=busy||!s.connected||s.syncing;
  $('login').disabled=busy||!s.clientConfigured||s.connected;
- $('connectExisting').disabled=busy||!s.clientConfigured||s.connected;
+ $('connectExisting').disabled=busy||!s.clientConfigured||s.syncing;
+ $('connectExisting').textContent=s.connected?'檢查並切換至指定資料夾':'連接指定資料夾';
+ $('createNew').disabled=busy||!s.clientConfigured||s.connected;
+ $('useVisible').disabled=busy||!s.clientConfigured||s.connected;
  message($('health'),s.checkError||s.syncError?('最近錯誤：'+[s.checkError,s.syncError].filter((v,i,a)=>v&&a.indexOf(v)===i).join('；')+'。已寫入本機的圖片會保留，請檢查連線或重新授權。'):s.lastSync||'',!!(s.checkError||s.syncError));
 }
 async function display(){if(polling)return;polling=true;try{draw(await rpc('details'));}catch(e){if(!busy)message($('result'),e.message,true);}finally{polling=false;}}
 async function run(type,data){
  if(busy)return;busy=true;if(snapshot)draw(snapshot);message($('result'),type==='connect'?'等待 Google 授權…':type==='verify'?'正在檢查 Google Drive…':'正在同步…');
- try{const s=await rpc(type,data);const d=await rpc('details');draw(d);if(type==='connect')message($('result'),s.setupAction==='created'?'已建立 YouTube Slides 資料夾並完成連線。':s.setupAction==='found'?'已找到可存取的 YouTube Slides 資料夾並完成連線。':'已綁定 Google Drive，回到 YouTube 即可使用。');else if(type==='verify')message($('result'),'連線與資料夾檢查成功。');else message($('result'),s.syncError||s.checkError?'同步尚未完成，請查看最近錯誤。':s.pending?'已完成本次批次，剩餘 '+s.pending+' 張將繼續補傳。':'無待同步圖片。',!!(s.syncError||s.checkError));}
+ try{const s=await rpc(type,data);const d=await rpc('details');draw(d);if(type==='connect'){
+   if(s.setupAction==='needsChoice'){
+    $('noFolderChoices').hidden=false;
+    $('createNew').hidden=!!s.emptyCandidate;
+    $('useVisible').hidden=!s.emptyCandidate;
+    $('useVisible').dataset.folder=s.emptyCandidate||'';
+    $('advancedSetup').open=true;
+    message($('noFolderMessage'),s.emptyCandidate?'找到一個可存取但空白的同名資料夾；可能是之前誤建立的資料夾。請優先指定原本的 Google Drive 資料夾，不要再建立新資料夾。':'最小權限無法確認你是否已經有資料夾。請優先指定原資料夾；只有確認是全新使用者才建立。');
+    message($('result'),'沒有自動建立資料夾；請先選擇連接既有資料夾或明確建立新的。');
+   }else{
+    $('noFolderChoices').hidden=true;
+    message($('result'),s.setupAction==='created'?'已建立新的 YouTube Slides 資料夾。':s.setupAction==='switched'?'已安全改連至指定的既有資料夾；原資料夾沒有被移動或刪除。':s.setupAction==='found'?'已找到可存取的 YouTube Slides 資料夾並完成連線。':'已綁定 Google Drive，回到 YouTube 即可使用。');
+   }
+  }else if(type==='verify')message($('result'),'連線與資料夾檢查成功。');else message($('result'),s.syncError||s.checkError?'同步尚未完成，請查看最近錯誤。':s.pending?'已完成本次批次，剩餘 '+s.pending+' 張將繼續補傳。':'無待同步圖片。',!!(s.syncError||s.checkError));}
  catch(e){message($('result'),e.message,true);}
  finally{busy=false;if(snapshot)draw(snapshot);await display();}
 }
@@ -40,8 +56,12 @@ $('connectExisting').onclick=()=>{
  if(!$('confirm').checked||!$('folder').value.trim()){
   message($('result'),'請先填入資料夾網址並確認完整 Drive 授權。',true);return;
  }
- void run('connect',{mode:'existing',folder:$('folder').value.trim()});
+ const switching=!!snapshot?.connected;
+ if(switching&&!confirm('將目前綁定的資料夾改為指定資料夾？\n\n只允許原資料夾為空白且沒有待同步圖片時切換。程式不會自動合併、搬移或刪除任何 Google Drive 檔案。'))return;
+ void run('connect',{mode:'existing',folder:$('folder').value.trim(),replaceExisting:switching});
 };
+$('useVisible').onclick=()=>{const folder=$('useVisible').dataset.folder;if(folder)void run('connect',{mode:'useVisible',folder});};
+$('createNew').onclick=()=>{if(confirm('確定要建立全新的 YouTube Slides 資料夾？\n\n只有確認原本沒有使用中的資料夾時才應建立；此動作可能造成重複資料夾。'))void run('connect',{mode:'create'});};
 $('reauth').onclick=()=>{if(snapshot?.connected)void run('connect',{mode:snapshot.mode});};
 $('sync').onclick=()=>void run('syncNow');
 $('verify').onclick=()=>void run('verify');
