@@ -14,11 +14,21 @@
 <div class="row"><button class="primary" id="sync" disabled>立即同步</button><button id="verify" disabled>檢查連線</button><button id="reauth" hidden disabled>重新授權</button></div>
 <div class="message" id="result" role="status"></div><div class="message" id="health" role="status"></div>
 </section>
-<section class="card" id="loginCard" hidden><h2>選用：Google Drive 自動備份</h2><p class="muted">不登入 Google 也能在 YouTube 擷取投影片、離線保存並匯出 ZIP。登入後，圖片會自動備份到你自己的 Google Drive，不會上傳到開發者的帳號。</p>
-<label class="choice"><input type="radio" name="mode" value="new" checked><span><strong>使用專用資料夾（最小權限）</strong><span class="muted">推薦新使用者：在你自己的 Google Drive 建立 YouTube Slides - API，僅要求指定檔案存取權限。</span></span></label>
-<label class="choice"><input type="radio" name="mode" value="existing"><span><strong>沿用既有 YouTube Slides 資料夾</strong><span class="muted">進階相容模式：讀取已存在的資料夾，可能需要完整 Drive 權限。公開版建議優先使用專用資料夾。</span></span></label>
-<div id="existingFields" hidden><label for="folder">既有資料夾網址或 ID</label><input class="field" id="folder" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off"><label class="row"><input type="checkbox" id="confirm"> 我了解完整 Drive 權限，並確認資料夾。</label></div>
-<p><button class="primary full" id="login" disabled>使用 Google 帳號登入</button></p><p class="muted">同一安裝只綁定一個帳號及資料夾。套件不提供雲端刪除功能。</p></section>
+<section class="card" id="loginCard" hidden>
+<h2>連接 Google Drive</h2>
+<p class="muted">登入後會先尋找此擴充套件可存取的「YouTube Slides」資料夾（含舊版「YouTube Slides - API」）；若不存在，將在你的雲端硬碟自動建立「YouTube Slides」。</p>
+<p><button class="primary full" id="login" disabled>使用 Google 帳號登入並自動設定</button></p>
+<p class="muted">預設只要求 <code>drive.file</code> 權限，不會掃描所有私人檔案。既有資料夾如果不是由本套件建立，可能無法自動找到；可在下方指定。</p>
+<details id="advancedSetup" class="folder">
+<summary>進階設定：手動指定既有資料夾</summary>
+<p class="muted">如果你已經有使用中的 YouTube Slides 資料夾，且自動搜尋無法辨識，請貼上資料夾網址。此相容模式會額外要求完整 Google Drive 權限。</p>
+<label for="folder">指定 Google Drive 資料夾網址或 ID</label>
+<input class="field" id="folder" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off">
+<label class="row"><input type="checkbox" id="confirm">我確認需要存取既有資料夾，並同意完整 Drive 授權。</label>
+<p><button id="connectExisting" disabled>連接指定資料夾</button></p>
+</details>
+<p class="muted">Google 登入是選用功能；不登入仍可離線擷取與匯出 ZIP。本套件不會將圖片傳送到開發者的帳號。</p>
+</section>
 <section class="card" id="namingCard" hidden>
 <h2>影片資料夾命名</h2>
 <p class="muted">新影片資料夾僅顯示標題，YouTube 影片 ID 存在 Google Drive 應用程式專用中繼資料。既有的 ID 資料夾不會自動變動。</p>
