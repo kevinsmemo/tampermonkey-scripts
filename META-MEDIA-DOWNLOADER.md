@@ -1,4 +1,4 @@
-# Meta Media Downloader 6.2.0
+# Meta Media Downloader 6.3.0
 
 Single userscript for Threads and Instagram. Built on the previously verified Threads 5.2.0 source (Git blob 99853fec54cef076c3a182958c848d5afc17d2f0). The original file and its branch are unchanged. The site dispatcher activates just one platform module.
 
@@ -28,3 +28,9 @@ Threads implementation retains its original MIT attribution. Reviewed user-expor
 - Threads and Instagram post headers use current-media download and all-media cloud download icons, in that order, before the native More menu where identifiable. Threads no longer translates the native menu. Existing Instagram fallback toolbars are preserved.
 - Threads current-media selection snapshots visible, clipped media at click time, prefers an overlapping video over its poster, and matches exact media paths or known variants/posters. Ambiguous slides or unknown video sources are not guessed. All-media parsing and post/reply scoping remain unchanged; optional matching metadata is added to records.
 - Copy as image still physically removes the entire custom Threads toolbar before capture. No new grants. Shared icon renderer and both platform startup paths tested with synthetic fixtures; live browser confirmation remains necessary.
+
+## 6.3.0: filenames and embedded provenance
+- Shared naming: YYYYMMDD_IG-or-Threads_account_ordinal.ext, Taiwan UTC+8 publication date. Unknown dates use unknown-date, unknown ordinal NA with a short media-path hash. Known source data is not fabricated; posts on the same date may still have the same name.
+- Lossless XMP for JPEG APP1, PNG iTXt, MP4 top-level Adobe UUID. The original compressed content is not re-encoded. Exact post data, when available, supplies account, caption, published time, shortcode, post URL and ordinal/total; download time and tool version are recorded separately. Some metadata is unavailable on certain pages. Finder may not display custom XMP fields.
+- New GM_xmlhttpRequest permission restricted to fbcdn.net and cdninstagram.com, anonymous read only on a user download action, no third-party calls. 64 MiB limit and 25-second timeout for metadata reads. Existing XMP, unsupported types, oversized media, failed reads and failed Blob saves retain direct original download. Metadata writer does not merge existing XMP or write WebP/GIF/AVIF in this version. GM_download Blob support depends on Tampermonkey version.
+- Synthetic binary tests and mock download/fallback checks passed; actual browser and file-viewer interoperability is not yet verified.
