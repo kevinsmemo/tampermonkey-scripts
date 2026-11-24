@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.3.0
+// @version      6.4.0
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -62,6 +62,8 @@
   const ALLOWED_HOSTS = ['fbcdn.net', 'cdninstagram.com', 'threads.com', 'threads.net'];
   const installed = new WeakMap();
   const MORE_GAP = 8;
+  const VIEWER='tm-threads-media-viewer';
+  let viewerEntry=null, viewerOrigin=null, viewerTimer=null;
   const metadataLimit = 64 * 1024 * 1024;
   let scanTimer = null;
   let captureMode = false;
@@ -82,7 +84,9 @@
     '.'+BTN+' button:disabled{opacity:.6;cursor:wait}',
     '.'+BTN+' button:focus-visible{outline:2px solid currentColor;outline-offset:2px}',
     '.'+BTN+' svg{display:block;width:22px;height:22px;flex:none}',
-    '[role="dialog"] .'+BTN+',[aria-modal="true"] .'+BTN+'{display:none!important}'
+    '[role="dialog"] .'+BTN+':not(.'+VIEWER+'),[aria-modal="true"] .'+BTN+':not(.'+VIEWER+'){display:none!important}',
+    '.'+BTN+'.'+VIEWER+'{position:fixed!important;top:18px;right:18px;z-index:2147483000;color:white;background:rgba(0,0,0,.45);padding:4px 6px;border-radius:9px;backdrop-filter:blur(8px);pointer-events:auto}',
+    '.'+VIEWER+'[hidden]{display:none!important}'
   ].join('');
   (document.head || document.documentElement).appendChild(style);
 
@@ -548,7 +552,7 @@
   function xmpPacket(meta) {
     const fields={Platform:meta.platform,Account:meta.account,PostID:meta.code,PostURL:meta.source,
       PublishedAt:meta.published,MediaOrdinal:meta.ordinal,MediaTotal:meta.total,
-      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.3.0',MediaKind:meta.kind};
+      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.4.0',MediaKind:meta.kind};
     const custom=Object.entries(fields).filter(([,v])=>v!==null&&v!==undefined&&v!=='')
       .map(([k,v])=>'<mmd:'+k+'>'+xmlText(v)+'</mmd:'+k+'>').join('');
     const description=meta.caption?'<dc:description><rdf:Alt><rdf:li xml:lang="x-default">'+xmlText(meta.caption)+'</rdf:li></rdf:Alt></dc:description>':'';
@@ -677,15 +681,14 @@
     return 'original';
   }
 
-  async function downloadPost(event,card,identity,group,button,mode) {
+  async function downloadPost(event,card,identity,group,button,mode,viewer=null) {
     event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
     const buttons=[...group.querySelectorAll('button')];
     if(buttons.some(b=>b.disabled)||captureMode)return;
-    const valid=()=>card.isConnected&&group.isConnected&&
-      postTimeCodes(card).size===1&&postTimeCodes(card).has(identity.code);
+    const valid=()=>!captureMode&&group.isConnected&&(viewer?viewerValid(viewer):validCard(card,identity));
     if(!valid())return;
     // Freeze the visible attachment at click time, not after fetching data.
-    const snapshot=mode==='current'?captureThreadMedia(card,identity):null;
+    const snapshot=mode==='current'?(viewer?viewerSnapshot(viewer.root):captureThreadMedia(card,identity)):null;
     if(mode==='current'&&!snapshot){
       button.title='無法辨識當前媒體：請將輪播停在一張圖片或影片後重試';
       downloadIcon(button,'error');
@@ -696,7 +699,7 @@
     let failures=0;
     try{
       downloadIcon(button,'busy');button.title='解析中…';
-      const data=await mediaInPost(card,identity);
+      const data=viewer?await viewerData(viewer,snapshot):await mediaInPost(card,identity);
       if(!valid()||data.ambiguous)return;
       const selected=mode==='current'?selectThreadCurrent(snapshot,data.result):null;
       const files=mode==='current'?(selected?[selected]:[]):data.result;
@@ -707,7 +710,7 @@
           '找不到可下載的媒體直連，請開啟原始貼文再試';
         return;
       }
-      const published=data.postMeta?.published||metadataTime(card);
+      const published=data.postMeta?.published||(validCard(card,identity)?metadataTime(card):null);
       const common={platform:'Threads',account:identity.user,code:identity.code,
         source:'https://www.threads.com/@'+encodeURIComponent(identity.user)+'/post/'+encodeURIComponent(identity.code),
         published,caption:data.postMeta?.caption||null,total:data.total,kind:'post',downloadedAt:new Date().toISOString()};
@@ -722,10 +725,10 @@
           if(status==='original')originalOnly++;
         }catch(_){failures++;}
       }
-      const partial=mode==='all'&&data.unavailableVideos;
+      const partial=mode==='all'&&(data.unavailableVideos||data.partial);
       downloadIcon(button,failures||partial?'error':'done');
       button.title=failures?'下載失敗 '+failures+'/'+files.length:
-        partial?'部分完成：部分影片沒有直連':'已下載 '+files.length+' 個媒體'+(originalOnly?'（'+originalOnly+' 個保留原檔，未寫入新中繼資料）':'');
+        partial?'部分完成：未能確認全部媒體':'已下載 '+files.length+' 個媒體'+(originalOnly?'（'+originalOnly+' 個保留原檔，未寫入新中繼資料）':'');
     }catch(_){
       downloadIcon(button,'error');button.title='下載失敗';
     }finally{
@@ -905,6 +908,7 @@
     // Physical removal, rather than just CSS hiding, prevents inclusion in
     // screenshots even if the renderer ignores external stylesheets.
     document.querySelectorAll('.' + BTN).forEach(button => button.remove());
+    viewerEntry=null;viewerOrigin=null;
     checkCopyCapture();
   }
 
@@ -936,7 +940,7 @@
     }
     const group=document.createElement('div');
     group.className=BTN;
-    for(const mode of ['current','all']){
+    for(const mode of ['all']){
       const button=document.createElement('button');
       button.type='button';button.dataset.action=mode;
       const label=mode==='current'?'下載當前圖片／影片':'下載此貼文全部圖片／影片';
@@ -949,12 +953,198 @@
     installed.set(card,{code:identity.code,button:group,more});
   }
 
+  // Separate viewer controls from feed controls. Resolve identity only from
+  // a canonical media route, exact viewer links, or an explicit media click.
+  function validCard(card,id){
+    if(!card?.isConnected||!id)return false;
+    const codes=postTimeCodes(card);
+    return codes.size===1&&codes.has(id.code);
+  }
+  function samePost(a,b){return !!a&&!!b&&a.code===b.code&&a.user.toLowerCase()===b.user.toLowerCase();}
+  function viewerRoute(raw){
+    try{const u=new URL(raw,location.href);
+      return /\/post\/[A-Za-z0-9_-]+\/media(?:\/|$)/.test(u.pathname)?identityFrom(u.href):null;
+    }catch(_){return null;}
+  }
+  function viewerRect(node){
+    const r=node.getBoundingClientRect(),st=getComputedStyle(node);
+    if(st.display==='none'||st.visibility==='hidden'||Number(st.opacity)===0)return null;
+    const q=threadsIntersection(r,{left:0,top:0,right:innerWidth,bottom:innerHeight});
+    return q.width>=100&&q.height>=100?q:null;
+  }
+  function viewerClose(root){
+    const pat=/^(?:close(?: media| viewer)?|exit(?: full screen| fullscreen)?|back|關閉(?:媒體|圖片|檢視器)?|返回|关闭)$/i;
+    for(const n of root.querySelectorAll('button,[role="button"],[aria-label],svg title')){
+      if(![n.getAttribute('aria-label'),n.getAttribute('title'),n.tagName.toLowerCase()==='title'?n.textContent:null].some(x=>pat.test(String(x||'').trim())))continue;
+      const b=n.closest('button,[role="button"]')||n,r=b.getBoundingClientRect();
+      if(r.width>=12&&r.height>=12&&r.width<=100&&r.height<=100)return b;
+    }
+    return null;
+  }
+  function viewerSnapshot(root){
+    const entries=[];
+    for(const node of root.querySelectorAll('img,video')){
+      if(node.closest('nav,aside,header,.'+BTN)||/profile picture|avatar|頭像|大頭貼/i.test(node.alt||''))continue;
+      const full=node.getBoundingClientRect();let rect=viewerRect(node);
+      if(!rect||full.width<150||full.height<110)continue;
+      for(let p=node.parentElement;p&&p!==root;p=p.parentElement){
+        const st=getComputedStyle(p),r=p.getBoundingClientRect();
+        const x=/hidden|clip|auto|scroll/.test(st.overflowX),y=/hidden|clip|auto|scroll/.test(st.overflowY);
+        if(x||y)rect=threadsIntersection(rect,{left:x?r.left:rect.left,right:x?r.right:rect.right,top:y?r.top:rect.top,bottom:y?r.bottom:rect.bottom});
+      }
+      const area=rect.width*rect.height,ratio=area/(full.width*full.height);
+      if(area<16000||ratio<.4)continue;
+      const hit=[[.5,.5],[.25,.5],[.75,.5]].some(([x,y])=>{
+        const stack=document.elementsFromPoint(rect.left+x*rect.width,rect.top+y*rect.height);
+        const top=stack.find(e=>!e.closest('.'+BTN));
+        if(!top||!root.contains(top)||!stack.includes(node))return false;
+        return !stack.slice(0,stack.indexOf(node)).some(e=>/^(IMG|VIDEO)$/.test(e.tagName));
+      });
+      if(!hit)continue;
+      const type=node.tagName==='VIDEO'?'video':'image',url=directURL(node);
+      if(type==='image'&&!url)continue;
+      entries.push({node,type,url,path:threadsMediaPath(url),poster:threadsMediaPath(node.poster),rect,area,ratio});
+    }
+    return chooseThreadMedia(entries);
+  }
+  function viewerLink(root){
+    const ids=new Map();
+    for(const a of root.querySelectorAll(POST_LINK)){
+      const id=identityFrom(a.href);
+      if(id&&(isTimeLink(a)||viewerRoute(a.href)))ids.set(id.code,id);
+    }
+    return ids.size===1?[...ids.values()][0]:null;
+  }
+  function findViewer(){
+    if(captureMode||isCopyPreviewVisible())return null;
+    const route=viewerRoute(location.href),options=[];
+    const add=(root,explicit)=>{
+      if(options.some(x=>x.root===root)||root.closest('[role="menu"]'))return;
+      const r=viewerRect(root),close=viewerClose(root);
+      if(!r||r.width<Math.min(300,innerWidth*.65)||r.height<Math.min(240,innerHeight*.5)||
+         (!close&&!route)||root.querySelector('[contenteditable="true"],textarea,input[type="text"]'))return;
+      const snapshot=viewerSnapshot(root);
+      if(snapshot)options.push({root,close,snapshot,explicit});
+    };
+    for(const root of document.querySelectorAll('[role="dialog"],[aria-modal="true"]'))add(root,true);
+    if(route||viewerEntry||viewerOrigin&&Date.now()-viewerOrigin.at<8000){
+      for(const node of document.querySelectorAll('img,video')){
+        if(!viewerRect(node))continue;
+        for(let p=node.parentElement,d=0;p&&p!==document.body&&d<15;p=p.parentElement,d++){
+          const r=p.getBoundingClientRect();
+          if(getComputedStyle(p).position==='fixed'&&r.width>=innerWidth*.5&&r.height>=innerHeight*.5){add(p,false);break;}
+        }
+      }
+    }
+    if(route&&!options.length)for(const main of document.querySelectorAll('main,[role="main"]'))if(viewerClose(main))add(main,false);
+    options.sort((a,b)=>Number(b.explicit)-Number(a.explicit)||b.snapshot.area-a.snapshot.area);
+    const first=options[0];if(!first)return null;
+    if(options.some(x=>x!==first&&!x.root.contains(first.root)&&!first.root.contains(x.root)&&x.snapshot.area>=first.snapshot.area*.85))return null;
+    return first;
+  }
+  function rememberMediaClick(event){
+    if(captureMode||viewerEntry||!(event.target instanceof Element)||event.target.closest('.'+BTN+',[role="dialog"],[role="menu"]'))return;
+    const target=event.target,link=target.closest('a[href*="/media"]');
+    let media=target.closest('img,video')||link?.querySelector('img,video')||target.closest('picture')?.querySelector('img');
+    if(!media){
+      for(let n=target,d=0;n&&d<5;n=n.parentElement,d++){
+        const list=[...n.querySelectorAll('img,video')].filter(m=>{
+          const r=m.getBoundingClientRect();return r.width>=150&&r.height>=110&&event.clientX>=r.left&&event.clientX<=r.right&&event.clientY>=r.top&&event.clientY<=r.bottom;
+        });
+        if(list.length===1){media=list[0];break;}if(list.length>1)break;
+      }
+    }
+    if(!media||/profile picture|avatar|頭像|大頭貼/i.test(media.alt||''))return;
+    if(media.getBoundingClientRect().width<100||media.getBoundingClientRect().height<100)return;
+    let id=viewerRoute(link?.href||media.closest('a[href*="/media"]')?.href||''),card=null;
+    for(let p=media.parentElement,d=0;p&&p!==document.body&&d<18;p=p.parentElement,d++){
+      const codes=postTimeCodes(p);if(codes.size>1)break;if(codes.size!==1)continue;
+      const time=[...p.querySelectorAll(POST_LINK)].find(isTimeLink),found=time&&identityFrom(time.href);
+      if(!found||(id&&!samePost(id,found)))break;
+      if(!belongsToPost(media,found,p))continue;
+      id=found;card=findCard(time,found)||p;if(!card.contains(media)||!validCard(card,id))card=p;break;
+    }
+    if(id){viewerOrigin={id,card:validCard(card,id)?card:null,at:Date.now()};schedule();}
+  }
+  function resolveViewerIdentity(root){
+    const route=viewerRoute(location.href),local=viewerLink(root);
+    if(route&&local&&!samePost(route,local))return null;
+    if(route||local)return route||local;
+    if(viewerEntry?.root===root)return viewerEntry.id;
+    return viewerOrigin&&Date.now()-viewerOrigin.at<8000?viewerOrigin.id:null;
+  }
+  function viewerValid(entry){
+    if(captureMode||viewerEntry!==entry||!entry.root.isConnected||!entry.group.isConnected||isCopyPreviewVisible())return false;
+    const route=viewerRoute(location.href),local=viewerLink(entry.root);
+    if((route&&!samePost(route,entry.id))||(local&&!samePost(local,entry.id))||(entry.routeBound&&!route))return false;
+    return !!viewerRect(entry.root)&&!!viewerSnapshot(entry.root);
+  }
+  async function viewerData(entry,snapshot){
+    const id=entry.id,card=entry.card;
+    let data=null;
+    if(validCard(card,id)){
+      data=await mediaInPost(card,id);
+      if(!data.ambiguous&&data.total===data.result.length&&data.total>0&&!data.unavailableVideos&&
+        (!snapshot||selectThreadCurrent(snapshot,data.result)?.ordinal))return data;
+    }
+    let exact=collectStructuredPost(document,id.code);
+    if(!exact.files.length||!exact.carousel||exact.unavailableVideos||exact.total>exact.files.length){
+      const remote=await permalinkPostMedia(id);
+      if(remote?.files.length&&(remote.carousel||remote.files.length>=exact.files.length))exact=remote;
+    }
+    if(exact.files.length)return {result:exact.files,total:exact.total,postMeta:exact.postMeta,embedded:exact.linked,
+      unavailableVideos:exact.unavailableVideos,partial:exact.total>exact.files.length};
+    if(data?.result?.length)return {...data,partial:true};
+    const current=snapshot||viewerSnapshot(entry.root);
+    return {result:current?.url?[{type:current.type,url:current.url,position:null}]:[],total:null,
+      unavailableVideos:current?.type==='video'&&!current.url?1:0,partial:true};
+  }
+  function removeViewer(){if(viewerEntry){viewerEntry.group.remove();viewerEntry=null;}}
+  function positionViewer(entry,candidate){
+    const r=candidate.close?.getBoundingClientRect(),w=entry.group.offsetWidth||76,h=entry.group.offsetHeight||36;
+    const right=r&&r.left>innerWidth*.6?innerWidth-r.left+8:18;
+    entry.group.style.right=Math.max(8,Math.min(innerWidth-w-8,right))+'px';
+    entry.group.style.top=Math.max(8,Math.min(innerHeight-h-8,r?r.top+(r.height-h)/2:18))+'px';
+  }
+  function syncViewer(){
+    if(captureMode||isCopyPreviewVisible()){removeViewer();return;}
+    const candidate=findViewer();
+    if(!candidate){
+      if(viewerEntry&&viewerRect(viewerEntry.root)&&(viewerEntry.routeBound?viewerRoute(location.href):viewerClose(viewerEntry.root))){
+        viewerEntry.group.hidden=true;return;
+      }
+      if(viewerEntry)viewerOrigin=null;
+      removeViewer();return;
+    }
+    const id=resolveViewerIdentity(candidate.root);
+    if(!id){removeViewer();return;}
+    if(viewerEntry?.root===candidate.root&&samePost(viewerEntry.id,id)&&viewerEntry.group.isConnected){
+      viewerEntry.group.hidden=false;positionViewer(viewerEntry,candidate);return;
+    }
+    removeViewer();
+    const group=document.createElement('div');group.className=BTN+' '+VIEWER;
+    const card=samePost(viewerOrigin?.id,id)&&validCard(viewerOrigin.card,id)?viewerOrigin.card:null;
+    const entry={root:candidate.root,id,card,group,routeBound:!!viewerRoute(location.href)};
+    for(const mode of ['current','all']){
+      const button=document.createElement('button');button.type='button';button.dataset.action=mode;
+      const label=mode==='current'?'下載當前圖片／影片':'下載此貼文全部圖片／影片';
+      button.title=label;button.setAttribute('aria-label',label);downloadIcon(button,mode);
+      button.addEventListener('click',e=>downloadPost(e,card,id,group,button,mode,entry),true);group.appendChild(button);
+    }
+    document.body.appendChild(group);viewerEntry=entry;positionViewer(entry,candidate);
+  }
+  function scheduleViewer(){
+    if(viewerTimer!==null)return;
+    viewerTimer=setTimeout(()=>{viewerTimer=null;syncViewer();},90);
+  }
+
   function scan() {
     scanTimer = null;
     if (captureMode) return;
     for (const anchor of document.querySelectorAll(POST_LINK)) {
       attach(anchor);
     }
+    syncViewer();
   }
 
   function schedule() {
@@ -963,6 +1153,11 @@
   }
 
   if (document.body) {
+    document.addEventListener('click',rememberMediaClick,true);
+    document.addEventListener('scroll',scheduleViewer,{passive:true,capture:true});
+    document.addEventListener('transitionend',scheduleViewer,true);
+    document.addEventListener('loadedmetadata',scheduleViewer,true);
+    document.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Escape'].includes(e.key))scheduleViewer();},true);
     new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
     document.addEventListener('load', event => {
       if (event.target?.tagName === 'IMG' || event.target?.tagName === 'VIDEO') schedule();
@@ -1840,8 +2035,8 @@
     window.addEventListener('scroll',scheduleVideoFallbacks,{passive:true,capture:true});
     for(const event of ['loadedmetadata','loadeddata','play','playing','resize'])document.addEventListener(event,e=>{if(e.target?.tagName==='VIDEO')scheduleIG();},true);
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.3.0 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.4.0 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.3.0 Threads loaded');
+  console.info('[Meta Media Downloader] 6.4.0 Threads loaded');
 })();
