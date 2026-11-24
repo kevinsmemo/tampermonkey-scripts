@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.5.0
+// @version      6.5.1
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -557,7 +557,7 @@
   function xmpPacket(meta) {
     const fields={Platform:meta.platform,Account:meta.account,PostID:meta.code,PostURL:meta.source,
       PublishedAt:meta.published,MediaOrdinal:meta.ordinal,MediaTotal:meta.total,
-      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.5.0',MediaKind:meta.kind};
+      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.5.1',MediaKind:meta.kind};
     const custom=Object.entries(fields).filter(([,v])=>v!==null&&v!==undefined&&v!=='')
       .map(([k,v])=>'<mmd:'+k+'>'+xmlText(v)+'</mmd:'+k+'>').join('');
     const description=meta.caption?'<dc:description><rdf:Alt><rdf:li xml:lang="x-default">'+xmlText(meta.caption)+'</rdf:li></rdf:Alt></dc:description>':'';
@@ -1009,9 +1009,9 @@
       if(old){old.group.remove();thumbnailEntries.delete(node);}
       const group=document.createElement('div');group.className=BTN+' '+THUMB;
       group.addEventListener('pointerdown',e=>e.stopPropagation());
-      for(const mode of ['current','all']){
+      for(const mode of ['current']){
         const button=document.createElement('button');button.type='button';button.dataset.action=mode;
-        const label=mode==='current'?'下載此圖片／影片':'下載此貼文全部圖片／影片';
+        const label='下載此圖片／影片';
         button.title=label;button.setAttribute('aria-label',label);downloadIcon(button,mode);
         button.addEventListener('click',e=>downloadPost(e,card,identity,group,button,mode,null,node),true);
         group.appendChild(button);
@@ -2192,7 +2192,7 @@
           const cover=mediaPath(node.tagName==='VIDEO'?node.poster:directURL(node));
           const data=await gridPostData(id);
           return gridCurrent(data,id,cover);
-        },null,{host:link,allResolver:()=>gridPostData(id),validate:valid});
+        },null,{host:link,validate:valid});
       }
     }
 
@@ -2296,8 +2296,8 @@
     document.addEventListener('load',e=>{if(e.target?.tagName==='IMG')scheduleIG();},true);
     for(const event of ['loadedmetadata','loadeddata','play','playing','resize'])document.addEventListener(event,e=>{if(e.target?.tagName==='VIDEO')scheduleIG();},true);
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.5.0 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.5.1 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.5.0 Threads loaded');
+  console.info('[Meta Media Downloader] 6.5.1 Threads loaded');
 })();
