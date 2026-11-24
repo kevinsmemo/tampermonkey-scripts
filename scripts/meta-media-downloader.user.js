@@ -684,7 +684,7 @@
   async function downloadPost(event,card,identity,group,button,mode,viewer=null) {
     event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
     const buttons=[...group.querySelectorAll('button')];
-    if(buttons.some(b=>b.disabled)||captureMode)return;
+    if(buttons.some(b=>b.disabled)||captureMode||(!viewer&&viewerEntry))return;
     const valid=()=>!captureMode&&group.isConnected&&(viewer?viewerValid(viewer):validCard(card,identity));
     if(!valid())return;
     // Freeze the visible attachment at click time, not after fetching data.
@@ -973,7 +973,7 @@
     return q.width>=100&&q.height>=100?q:null;
   }
   function viewerClose(root){
-    const pat=/^(?:close(?: media| viewer)?|exit(?: full screen| fullscreen)?|back|關閉(?:媒體|圖片|檢視器)?|返回|关闭)$/i;
+    const pat=/^(?:close(?: media viewer| media| viewer| image| photo| video| dialog)?|dismiss|exit(?: full screen| fullscreen)?|back|關閉(?:媒體檢視器|媒體|圖片|影片|檢視器|對話框)?|返回|关闭)$/i;
     for(const n of root.querySelectorAll('button,[role="button"],[aria-label],svg title')){
       if(![n.getAttribute('aria-label'),n.getAttribute('title'),n.tagName.toLowerCase()==='title'?n.textContent:null].some(x=>pat.test(String(x||'').trim())))continue;
       const b=n.closest('button,[role="button"]')||n,r=b.getBoundingClientRect();
@@ -1153,11 +1153,19 @@
   }
 
   if (document.body) {
-    document.addEventListener('click',rememberMediaClick,true);
+    document.addEventListener('click',e=>{
+      if(viewerEntry&&e.target instanceof Element){
+        const close=viewerClose(viewerEntry.root);
+        if(close&&(close===e.target||close.contains(e.target))){
+          removeViewer();viewerOrigin=null;schedule();return;
+        }
+      }
+      rememberMediaClick(e);
+    },true);
     document.addEventListener('scroll',scheduleViewer,{passive:true,capture:true});
     document.addEventListener('transitionend',scheduleViewer,true);
     document.addEventListener('loadedmetadata',scheduleViewer,true);
-    document.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Escape'].includes(e.key))scheduleViewer();},true);
+    document.addEventListener('keydown',e=>{if(e.key==='Escape'&&viewerEntry){removeViewer();viewerOrigin=null;}if(['ArrowLeft','ArrowRight','Escape'].includes(e.key))scheduleViewer();},true);
     new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
     document.addEventListener('load', event => {
       if (event.target?.tagName === 'IMG' || event.target?.tagName === 'VIDEO') schedule();
