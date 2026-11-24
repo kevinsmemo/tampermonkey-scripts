@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.1.2
+// @version      6.1.3
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -767,6 +767,8 @@
   // or Instagram Download Button implementation, resources or runtime libraries.
   function initInstagram() {
     const CLASS='meta-media-ig-tools',bound=new WeakMap(),groupActions=new WeakMap();
+    const videoFallbacks=new Map();
+    let fallbackLayoutPending=false;
     const css=document.createElement('style');
     css.textContent=[
       '.meta-media-ig-anchor{position:relative!important}',
@@ -782,6 +784,8 @@
       '.'+CLASS+'-header button:hover{background:rgba(128,128,128,.15)}',
       '.'+CLASS+'-header svg{width:22px;height:22px}',
       '.'+CLASS+'-header button:focus-visible{outline-color:currentColor}',
+      '.'+CLASS+'-video-portal{position:fixed!important;top:0;left:0;right:auto;margin:0;z-index:2147483000;pointer-events:auto;flex-direction:row;gap:6px;padding:3px 5px;border-radius:8px}',
+      '.'+CLASS+'-video-portal[hidden]{display:none!important}',
       '.meta-media-ig-more-row{display:flex!important;flex-direction:row!important;align-items:center!important;flex:0 0 auto!important;width:auto!important;min-width:0!important;white-space:nowrap!important}'
 
     ].join('');
@@ -1228,7 +1232,7 @@
     }
 
     function controls(scope,key,resolver,owner,options={}){
-      const {host=scope,floating=false,validate=()=>true,allResolver=null,more=null}=options;
+      const {host=scope,floating=false,validate=()=>true,allResolver=null,more=null,portal=false}=options;
       const slot=more?menuInsertion(more,scope):null;
       const existing=scope?bound.get(scope):null;
       if(existing?.key===key&&existing.group.isConnected&&existing.host===host&&existing.more===more&&
@@ -1237,8 +1241,8 @@
       if(!floating&&(!host||!host.isConnected))return;
       // If the native menu wrapper is unavailable, retain the media overlay.
       const group=document.createElement('div');
-      group.className=CLASS+(floating?' '+CLASS+'-floating':slot?' '+CLASS+'-header':'');
-      if(!slot&&!floating&&key!=='avatar:'+owner&&host.querySelector('video'))group.style.top='60px';
+      group.className=CLASS+(portal?' '+CLASS+'-video-portal':floating?' '+CLASS+'-floating':slot?' '+CLASS+'-header':'');
+      if(!slot&&!floating&&!portal&&key!=='avatar:'+owner&&host.querySelector('video'))group.style.top='60px';
       group.dataset.metaMediaKey=key;
       const current=document.createElement('button');
       current.type='button';current.dataset.action='current';
@@ -1295,7 +1299,7 @@
       if(all)all.addEventListener('click',e=>act(e,'all'));
       groupActions.set(group,{act,all:!!all});
       let row=null;
-      if(floating)document.body.append(group);
+      if(floating||portal)document.body.append(group);
       else if(slot){
         const {parent,anchor}=slot;
         const style=getComputedStyle(parent);
@@ -1312,6 +1316,7 @@
         host.append(group);
       }
       if(scope)bound.set(scope,{key,group,host,more,row});
+      return group;
     }
 
     // Without a permalink, resolve only the exact current video's CDN
@@ -1381,15 +1386,155 @@
       return fallback;
     }
 
+    function playableRect(video){
+      if(!video?.isConnected||video.closest('nav,aside'))return null;
+      const r=video.getBoundingClientRect(),css=getComputedStyle(video);
+      if(r.width<120||r.height<100||css.display==='none'||css.visibility==='hidden')return null;
+      const clip=intersection(r,{left:0,top:0,right:innerWidth,bottom:innerHeight});
+      if(clip.width<100||clip.height<80)return null;
+      // Skip players hidden by a carousel's clipping container.
+      for(let p=video.parentElement;p&&p!==document.body;p=p.parentElement){
+        const style=getComputedStyle(p),q=p.getBoundingClientRect();
+        const x=/hidden|clip|auto|scroll/.test(style.overflowX),y=/hidden|clip|auto|scroll/.test(style.overflowY);
+        if((x&&(r.right<=q.left||r.left>=q.right))||(y&&(r.bottom<=q.top||r.top>=q.bottom)))return null;
+      }
+      return r;
+    }
+    function videoSnapshot(video){
+      const url=igAsset(directURL(video),'video');
+      return {type:'video',url,path:mediaPath(url),poster:mediaPath(video.poster)};
+    }
+    function localVideoTarget(video){
+      // Discover a nearby native menu and exact post link when available;
+      // neither is required for rendering the fallback toolbar.
+      const article=video.closest('article,[role="article"]');
+      const vr=video.getBoundingClientRect();
+      let scope=video.parentElement,menu=null;
+      for(let n=video.parentElement,depth=0;n&&depth<16&&n!==document.body&&n!==document.documentElement;depth++,n=n.parentElement){
+        if(n.matches('main,[role="main"]'))break;
+        if(n.querySelectorAll('video').length!==1)break;
+        const q=n.getBoundingClientRect();
+        if(q.width>vr.width*1.8||q.height>vr.height*2.1)break;
+        if(q.width>=vr.width*.75&&q.height>=vr.height*.75){
+          scope=n;
+          const candidate=postMoreControl(n,n);
+          if(candidate){menu=candidate;break;}
+        }
+        if(n===article)break;
+      }
+      if(article&&article.querySelectorAll('video').length===1){
+        const id=postIdentity(article);
+        if(id||!menu)scope=article;
+      }
+      const id=scope?postIdentity(scope):null;
+      return {scope,menu:menu||(scope?postMoreControl(scope,scope):null),id};
+    }
+    async function resolveVideoElement(video,all=false){
+      if(!playableRect(video))return {files:[],missing:1};
+      const snap=videoSnapshot(video),target=localVideoTarget(video);
+      if(target.id){
+        const embedded=igCollect(document,target.id);
+        const match=matchCurrent(snap,embedded);
+        if(all&&match&&embedded.files.length===embedded.total&&!embedded.missing)return embedded;
+        if(!all&&match)return {files:[match],missing:0,owner:embedded.owner,taken:embedded.taken};
+        if(all||!snap.url){
+          const frame=mediaHost(target.scope)||video.parentElement;
+          const data=await resolvePost(target.scope,target.id);
+          const exact=matchCurrent(snap,data);
+          if(all&&exact&&!data.domOnly)return {...data,missing:Math.max(data.missing||0,data.total-data.files.length)};
+          if(!all&&exact)return {files:[exact],missing:0,owner:data.owner,taken:data.taken};
+        }
+      }
+      const exact=uniqueVideoIdentity(snap);
+      if(exact){
+        if(all)return {...exact.data,missing:Math.max(exact.data.missing||0,exact.data.total-exact.data.files.length)};
+        return {files:[exact.file],missing:0,owner:exact.data.owner,taken:exact.data.taken};
+      }
+      if(snap.url)return {files:[{type:'video',url:snap.url,position:1}],missing:all?1:0};
+      return {files:[],missing:1};
+    }
+    function normalVideoToolbar(video){
+      // Do not exclude videos merely because they are inside <article>.
+      // Only a connected, visible toolbar for this actual player counts.
+      for(let p=video.parentElement;p&&p!==document.body;p=p.parentElement){
+        const entry=bound.get(p);
+        if(entry?.group.isConnected&&!entry.group.classList.contains(CLASS+'-video-portal')&&
+           entry.host?.contains(video)&&visible(entry.group)){
+          const r=entry.group.getBoundingClientRect();
+          const x=r.left+r.width/2,y=r.top+r.height/2;
+          const top=document.elementFromPoint(x,y);
+          if(top&&entry.group.contains(top))return true;
+        }
+      }
+      return false;
+    }
+    function positionVideoFallback(video,entry){
+      const r=playableRect(video);
+      if(!r||normalVideoToolbar(video)){entry.group.hidden=true;return;}
+      const {menu}=localVideoTarget(video);
+      const mr=menu?.getBoundingClientRect();
+      entry.group.hidden=false;
+      const w=entry.group.offsetWidth||76,h=entry.group.offsetHeight||34;
+      // If native menu is visible, align both icons immediately to its left.
+      // Otherwise use a safe spot below the video header, avoiding Follow/More.
+      const menuVisible=mr&&mr.width>0&&mr.height>0&&mr.top>=0&&mr.bottom<=innerHeight;
+      const x=menuVisible?mr.left-w-6:r.right-w-10;
+      const y=menuVisible?mr.top+(mr.height-h)/2:r.top+48;
+      if(y<0||y+h>innerHeight){entry.group.hidden=true;return;}
+      const hit=document.elementFromPoint(Math.max(0,Math.min(innerWidth-1,r.left+r.width/2)),Math.max(0,Math.min(innerHeight-1,Math.max(r.top,0)+Math.min(r.height/2,Math.max(20,(innerHeight-Math.max(r.top,0))/2)))));
+      // Do not draw over unrelated modal dialogs.
+      if(hit?.closest('[role="dialog"],[aria-modal="true"]')&&!hit.closest('[role="dialog"],[aria-modal="true"]').contains(video)){entry.group.hidden=true;return;}
+      entry.group.style.left=Math.round(Math.max(4,Math.min(innerWidth-w-4,x)))+'px';
+      entry.group.style.top=Math.round(y)+'px';
+    }
+    function reconcileVideoFallbacks(){
+      fallbackLayoutPending=false;
+      if(storyIdentity()){
+        for(const entry of videoFallbacks.values())entry.group.remove();
+        videoFallbacks.clear();return;
+      }
+      for(const [video,entry] of videoFallbacks){
+        if(!video.isConnected||!entry.group.isConnected){
+          entry.group.remove();videoFallbacks.delete(video);
+        }
+      }
+      // Scan all actual video elements, including recommendations and dialogs
+      // outside <main>. Never fetch anything simply to show a button.
+      for(const video of document.querySelectorAll('video')){
+        if(!playableRect(video))continue;
+        let entry=videoFallbacks.get(video);
+        if(!entry&&normalVideoToolbar(video))continue;
+        if(!entry){
+          const group=controls(video,'video-fallback',()=>resolveVideoElement(video),null,{
+            host:video,portal:true,allResolver:()=>resolveVideoElement(video,true),
+            validate:()=>!!playableRect(video)&&video.isConnected
+          });
+          if(!group)continue;
+          entry={group};videoFallbacks.set(video,entry);
+        }
+        positionVideoFallback(video,entry);
+      }
+      // Previously visible players can leave the viewport without a DOM change.
+      for(const [video,entry] of videoFallbacks)if(!playableRect(video))entry.group.hidden=true;
+    }
+    function scheduleVideoFallbacks(){
+      if(fallbackLayoutPending)return;
+      fallbackLayoutPending=true;
+      requestAnimationFrame(reconcileVideoFallbacks);
+    }
+
     function scan(){
       scanPending=false;
       if(previousPath!==location.pathname){
+        for(const entry of videoFallbacks.values())entry.group.remove();
+        videoFallbacks.clear();
         document.querySelectorAll('.'+CLASS).forEach(e=>e.remove());
         document.querySelectorAll('.meta-media-ig-more-row').forEach(e=>e.classList.remove('meta-media-ig-more-row'));
         previousPath=location.pathname;
       }
       const story=storyIdentity();
       if(story){
+        scheduleVideoFallbacks();
         const s=storyScope();
         const key='story:'+story.key;
         if(!document.querySelector('.'+CLASS+'[data-meta-media-key="'+CSS.escape(key)+'"]'))
@@ -1454,8 +1599,9 @@
       }
     }
     function scheduleIG(){
+      scheduleVideoFallbacks();
       if(scanPending)return;
-      scanPending=true;setTimeout(scan,250);
+      scanPending=true;setTimeout(()=>{try{scan();}finally{scheduleVideoFallbacks();}},250);
     }
     document.addEventListener('keydown',e=>{
       if(!e.altKey||e.ctrlKey||e.metaKey||e.repeat||e.target?.closest?.('input,textarea,[contenteditable="true"]'))return;
@@ -1471,9 +1617,11 @@
     new MutationObserver(scheduleIG).observe(document.body,{childList:true,subtree:true});
     window.addEventListener('popstate',scheduleIG);
     window.addEventListener('resize',scheduleIG,{passive:true});
+    window.addEventListener('scroll',scheduleVideoFallbacks,{passive:true,capture:true});
+    for(const event of ['loadedmetadata','loadeddata','play','playing','resize'])document.addEventListener(event,e=>{if(e.target?.tagName==='VIDEO')scheduleIG();},true);
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.1.2 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.1.3 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.1.2 Threads loaded');
+  console.info('[Meta Media Downloader] 6.1.3 Threads loaded');
 })();
