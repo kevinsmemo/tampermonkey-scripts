@@ -952,8 +952,17 @@
     async function resolvePost(scope,identity){
       let best=igDom(scope);
       if(best.missing&&best.files.every(f=>f.type==='image'))best={...best,files:[]};
-      best=better(best,igCollect(document,identity));
+      const embedded=igCollect(document,identity);
+      // Prefer the verified complete exact-post record to DOM heuristics.
+      // Avoid API requests entirely when the page already exposes all items.
+      if(embedded.files.length&&embedded.total===embedded.files.length&&!embedded.missing&&
+         embedded.files.filter(f=>f.type==='video').length>=best.files.filter(f=>f.type==='video').length)
+        return embedded;
+      best=better(best,embedded);
       const info=await igInfo(identity);
+      if(info?.files?.length&&info.total===info.files.length&&!info.missing&&
+         info.files.filter(f=>f.type==='video').length>=best.files.filter(f=>f.type==='video').length)
+        return info;
       best=better(best,info);
       // A response can be missing carousel data or no longer accessible.
       // Fetch only the exact clicked post, never another account or service.
@@ -1030,7 +1039,7 @@
       return getTimestamp(scope||document);
     }
 
-    function controls(scope,key,resolver,owner,floating=false){
+    function controls(scope,key,resolver,owner,floating=false,validate=()=>true){
       const existing=scope?bound.get(scope):null;
       if(existing?.key===key&&existing.group.isConnected)return;
       if(existing)existing.group.remove();
@@ -1046,6 +1055,11 @@
       async function act(event,mode){
         event.preventDefault();event.stopPropagation();
         if(download.disabled)return;
+        if(!validate()){
+          download.title='頁面已切換，請重新選取目前貼文';
+          scheduleIG();
+          return;
+        }
         // Bind a new popup to the explicit click before awaiting network.
         const tab=mode==='open'?window.open('about:blank','_blank'):null;
         if(tab)try{tab.opener=null}catch(_){}
@@ -1056,7 +1070,7 @@
         button.textContent='解析中…';
         try{
           const data=await resolver();
-          if(currentPath!==location.pathname||!group.isConnected){if(tab)tab.close();return;}
+          if(currentPath!==location.pathname||!group.isConnected||!validate()){if(tab)tab.close();return;}
           const files=data?.files||[];
           if(!files.length){if(tab)tab.close();button.textContent='無可下載媒體';button.title='無法安全辨識目前媒體；可先開啟該貼文或播放影片再試。';return;}
           if(mode==='open'){tab.location.replace(files[0].url);button.textContent='已開啟';return;}
@@ -1094,7 +1108,7 @@
         const s=storyScope();
         const key='story:'+story.key;
         if(!document.querySelector('.'+CLASS+'[data-meta-media-key="'+CSS.escape(key)+'"]'))
-          controls(s||document.body,key,()=>resolveStory(storyScope(),story),story.highlight?null:story.owner,true);
+          controls(s||document.body,key,()=>resolveStory(storyScope(),story),story.highlight?null:story.owner,true,()=>storyIdentity()?.key===story.key);
         return;
       }
       const profile=profileScope();
@@ -1110,7 +1124,7 @@
       for(const article of articles){
         const id=postIdentity(article);
         if(!id)continue;
-        controls(article,'post:'+id.code,()=>resolvePost(article,id),null);
+        controls(article,'post:'+id.code,()=>resolvePost(article,id),null,false,()=>article.isConnected&&postIdentity(article)?.code===id.code);
       }
       // Direct reel/post route without an article: accept only an unambiguous
       // main scope. Do not guess which video on an endless Reels feed is active.
@@ -1119,7 +1133,7 @@
         if(main&&!articles.length&&igURLs(main).size<=1&&
            (!igURLs(main).size||igURLs(main).has(route.code))&&
            [...main.querySelectorAll('video')].filter(visible).length<=1){
-          controls(main,'post:'+route.code,()=>resolvePost(main,route),null);
+          controls(main,'post:'+route.code,()=>resolvePost(main,route),null,false,()=>main.isConnected&&igIdentity(location.href)?.code===route.code&&igURLs(main).size<=1&&(!igURLs(main).size||igURLs(main).has(route.code)));
         }
       }
     }
