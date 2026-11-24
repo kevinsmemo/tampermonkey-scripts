@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Threads.net Media Downloader v5 (Maintained Beta)
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      5.1.0-beta.8
+// @version      5.2.0
 // @description  One Download button per Threads post to save that post's photos and direct videos.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -96,7 +96,7 @@
       if (url.protocol !== 'https:') return null;
       const host = url.hostname.toLowerCase();
       if (!ALLOWED_HOSTS.some(s => host === s || host.endsWith('.' + s))) return null;
-      if (/\.m3u8$/i.test(url.pathname)) return null;
+      if (/\.(?:m3u8|mpd|m4s|ts)$/i.test(url.pathname)) return null;
       return url.href;
     } catch (_) { return null; }
   }
@@ -116,8 +116,8 @@
 
   function directURL(element) {
     if (element.tagName === 'VIDEO') {
-      const child = element.querySelector('source[src]');
-      return [element.currentSrc, element.src, child?.src].map(mediaURL).find(Boolean) || null;
+      const sources = [...element.querySelectorAll('source[src]')].map(el => el.src);
+      return [element.currentSrc, element.src, ...sources].map(mediaURL).find(Boolean) || null;
     }
     let url = bestSrcset(element.getAttribute('srcset') || element.srcset);
     if (!url) {
@@ -133,7 +133,7 @@
 
   // Use a post's own carousel_media list: each entry is one attachment,
   // while video_versions 101/102/103 are quality choices for that attachment.
-  function parsePostRecord(record) {
+  function parseNativeMedia(record) {
     const nested = record.media;
     const hasNestedMedia = nested && typeof nested === 'object' &&
       (Array.isArray(nested.carousel_media) || Array.isArray(nested.video_versions) ||
@@ -176,6 +176,38 @@
     return { files, total: attachments.length, unavailableVideos, carousel };
   }
 
+  // Threads stores an explicitly attached Instagram post/reel in
+  // text_post_app_info.linked_inline_media. Never follow share_info,
+  // containing_thread or direct_replies: those are different posts.
+  function parsePostRecord(record) {
+    const native = parseNativeMedia(record);
+    const linked = record.text_post_app_info?.linked_inline_media ||
+      record.linked_inline_media || record.media?.text_post_app_info?.linked_inline_media;
+    if (!linked || typeof linked !== 'object' || native.carousel ||
+        native.files.some(file => file.type === 'video')) return native;
+    const items = Array.isArray(linked) ? linked : [linked];
+    const results = items.slice(0,30).map(item => parseNativeMedia(item?.node || item));
+    const files = [], seen = new Set();
+    for (const item of results) {
+      for (const file of item.files) {
+        if (seen.has(file.url)) continue;
+        seen.add(file.url); files.push(file);
+      }
+    }
+    const videoFiles = files.filter(file => file.type === 'video');
+    const unavailableVideos = results.reduce((sum,r) => sum + r.unavailableVideos,0);
+    if (videoFiles.length) return {
+      files, total:results.reduce((sum,r) => sum+r.total,0),
+      unavailableVideos, carousel:results.some(r=>r.carousel)||items.length>1,
+      linked:true
+    };
+    // A linked video without a usable URL is not a downloadable still image.
+    if (unavailableVideos) return {files:[],total:0,unavailableVideos,carousel:false,linked:true};
+    if (!native.files.length && files.length)
+      return {files,total:files.length,unavailableVideos:0,carousel:files.length>1,linked:true};
+    return {...native,linked:true};
+  }
+
   function collectStructuredPost(doc, postCode) {
     let best = { files: [], total: 0, unavailableVideos: 0, carousel: false };
     const scripts = doc.querySelectorAll(
@@ -184,7 +216,7 @@
     for (const script of scripts) {
       const content = script.textContent || '';
       if (content.length > 4000000 || !content.includes(postCode) ||
-          !/(video_versions|carousel_media|image_versions2)/.test(content)) continue;
+          !/(video_versions|carousel_media|image_versions2|linked_inline_media)/.test(content)) continue;
       let root;
       try { root = JSON.parse(content); } catch (_) { continue; }
       let seen = 0;
@@ -199,7 +231,10 @@
           const candidate = parsePostRecord(node);
           const score = (candidate.carousel ? 1000 : 0) + candidate.files.length * 20 + candidate.total;
           const current = (best.carousel ? 1000 : 0) + best.files.length * 20 + best.total;
-          if (candidate.files.length && score > current) best = candidate;
+          const videoCount = p => p.files.filter(file=>file.type==='video').length;
+          if ((candidate.files.length && (videoCount(candidate)>videoCount(best) ||
+                (videoCount(candidate)===videoCount(best) && score>current))) ||
+              (!best.files.length && candidate.linked && !best.linked)) best = candidate;
         }
         for (const [key, value] of Object.entries(node)) {
           if (key !== 'video_versions' && key !== 'image_versions2') walk(value, depth + 1);
@@ -224,7 +259,7 @@
       const node = doc.querySelector(selector);
       const raw = node?.getAttribute('content');
       const url = mediaURL(raw);
-      if (url && !/\.(?:mpd|m3u8|m4s|ts)(?:$|[?#])/i.test(url)) return url;
+      if (url && /\.mp4$/i.test(new URL(url).pathname)) return url;
     }
     return null;
   }
@@ -250,7 +285,7 @@
       const mp4 = videoFromCanonicalMeta(doc);
       return mp4 ? {
         files: [{ type: 'video', url: mp4 }],
-        total: 1, unavailableVideos: 0, carousel: false
+        total: 1, unavailableVideos: 0, carousel: false, linked: structured.linked
       } : structured;
     } catch (_) {
       return null;
@@ -299,7 +334,24 @@
       !element.closest('header,nav,aside');
   }
 
+  function instagramEmbedPresent(card) {
+    // Only recognize actual video/reel URLs or a rendered Instagram logo,
+    // never a random mention of Instagram in the post text.
+    if (card.querySelector('[aria-label="Instagram logo"],[alt="Instagram logo"],[aria-label="Instagram 標誌"],[alt="Instagram 標誌"]')) return true;
+    return [...card.querySelectorAll('a[href],iframe[src]')].some(el => {
+      try {
+        const u = new URL(el.getAttribute('href') || el.getAttribute('src'),location.href);
+        return u.protocol==='https:' && /^(?:www\.)?instagram\.com$/i.test(u.hostname) &&
+          /^\/(?:reel|reels|tv)\/[A-Za-z0-9_-]+(?:\/|$)/.test(u.pathname);
+      } catch (_) { return false; }
+    });
+  }
+
   async function mediaInPost(card, identity) {
+    const codes = postTimeCodes(card);
+    if (codes.size !== 1 || !codes.has(identity.code))
+      return {result:[],unavailableVideos:0,ambiguous:true};
+    const instagram = instagramEmbedPresent(card);
     const nodes = [...card.querySelectorAll(MEDIA_SELECTOR)]
       .filter(node => belongsToPost(node, identity, card));
     const domFiles = [], seen = new Set();
@@ -325,12 +377,18 @@
       'button[aria-label*="next"],button[aria-label*="下一"],'+
       '[data-testid*="carousel"]'
     );
-    if ((videoCount > 0 || carouselControls) && (!structured.carousel ||
-        structured.unavailableVideos || structured.total < videoCount)) {
+    // Embedded players may have no video element until playback begins.
+    // In that case the previous version skipped the permalink fallback.
+    if (!domFiles.length || instagram || structured.linked ||
+        ((videoCount > 0 || carouselControls) && (!structured.carousel ||
+         structured.unavailableVideos || structured.total < videoCount))) {
       const remote = await permalinkPostMedia(identity);
       if (remote) {
         const rank = p => (p.carousel ? 1000 : 0) + p.files.length * 20 + p.total;
-        if (rank(remote) > rank(structured)) structured = remote;
+        const videos = p => p.files.filter(f=>f.type==='video').length;
+        if (videos(remote)>videos(structured) ||
+            (videos(remote)===videos(structured) && rank(remote)>rank(structured)) ||
+            (!structured.files.length && remote.linked)) structured = remote;
       }
     }
     // Carousel record preserves order and off-screen attachments. With only a
@@ -340,11 +398,18 @@
     // Never replace a real reply video with a static parent/preview image.
     const useStructured = structured.files.length > 0 &&
       structuredVideos >= directVideos &&
-      (structured.carousel || structured.files.length >= domFiles.length);
-    return {
-      result: useStructured ? structured.files : domFiles,
-      unavailableVideos: useStructured ? structured.unavailableVideos : unresolvedDOMVideos,
-    };
+      (structured.carousel || structured.files.length >= domFiles.length ||
+       (structuredVideos>directVideos && (structured.linked || instagram || videoCount>0)));
+    const result = useStructured ? structured.files : domFiles;
+    const embedded = Boolean(instagram || structured.linked);
+    // Never report a video as downloaded when only its poster was obtained.
+    if (!structured.carousel && !result.some(f=>f.type==='video') &&
+        (instagram || (structured.linked && structured.unavailableVideos>0))) {
+      return {result:[],unavailableVideos:Math.max(1,structured.unavailableVideos),
+        embedded:true};
+    }
+    return {result,embedded,
+      unavailableVideos:useStructured?structured.unavailableVideos:unresolvedDOMVideos};
   }
 
   function downloadOne(url, filename) {
@@ -368,8 +433,19 @@
     let failures = 0;
     try {
       button.textContent = '解析中…';
-      const { result: files, unavailableVideos } = await mediaInPost(card, identity);
+      const { result: files, unavailableVideos, embedded, ambiguous } = await mediaInPost(card, identity);
       if (!files.length) {
+        if (ambiguous) {
+          button.textContent='無法辨識貼文';
+          button.title='貼文範圍已變動，請重新整理後重試，避免下載其他貼文。';
+          return;
+        }
+        if (embedded) {
+          button.textContent='轉貼影片無直連';
+          button.title='尚未找到這則 Instagram 轉貼影片的 HTTPS 直連。可先播放影片再試，或開啟 Instagram 原始貼文。';
+          console.warn('[Threads v5 Maintained] Embedded video unavailable',{postCode:identity.code});
+          return;
+        }
         const videos = [...card.querySelectorAll('video')];
         const hasBlob = videos.some(v => [v.currentSrc, v.src].some(
           url => typeof url === 'string' && url.startsWith('blob:')
@@ -678,5 +754,5 @@
     window.addEventListener('resize', schedule, { passive: true });
     schedule();
   }
-  console.info('[Threads v5 Maintained] 5.1.0-beta.8 loaded');
+  console.info('[Threads v5 Maintained] 5.2.0 loaded');
 })();
