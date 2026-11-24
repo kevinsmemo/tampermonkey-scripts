@@ -1192,7 +1192,9 @@
     // of where the two controls are mounted.
     function postMoreControl(scope,frame){
       const owner=scope.closest('article');
-      const media=frame.getBoundingClientRect(),box=scope.getBoundingClientRect();
+      const box=scope.getBoundingClientRect();
+      const mediaTop=Math.min(...mediaNodes(frame).map(n=>n.getBoundingClientRect().top));
+      const mediaY=Number.isFinite(mediaTop)?mediaTop:frame.getBoundingClientRect().top;
       const seen=new Set(),candidates=[];
       for(const el of scope.querySelectorAll('button,[role="button"],[aria-label],svg[aria-label],svg title')){
         const label=[el.getAttribute('aria-label'),el.getAttribute('title'),
@@ -1206,28 +1208,21 @@
         // Only header menus above (or immediately alongside the top of)
         // this media, not comment menus and player controls farther below.
         const cy=r.top+r.height/2;
-        if(cy<box.top-4||cy>media.top+24||r.right<box.left+box.width*.55)continue;
-        if(frame.contains(control))continue;
+        const inHeader=!!control.closest('header');
+        if(cy<box.top-4||(!inHeader&&cy>mediaY+12)||r.right<box.left+box.width*.55)continue;
+        if(!inHeader&&cy>mediaY)continue;
         seen.add(control);
-        candidates.push({control,header:!!control.closest('header'),cy,right:r.right});
+        candidates.push({control,header:inHeader,cy,right:r.right});
       }
       candidates.sort((a,b)=>Number(b.header)-Number(a.header)||a.cy-b.cy||b.right-a.right);
       return candidates[0]?.control||null;
     }
     function menuInsertion(more,scope){
-      // Climb only menu-only wrappers, never the entire header. Inserting
-      // alongside the wrapper lets the existing header flex layout resize.
-      let anchor=more;
-      for(let i=0;i<5;i++){
-        const p=anchor.parentElement;
-        if(!p||p===scope||p.matches('header,article,main')||p.children.length!==1)break;
-        const r=p.getBoundingClientRect();
-        if(r.width>88||r.height>88)break;
-        anchor=p;
-      }
-      const parent=anchor.parentElement;
+      // Prefer an existing dedicated menu wrapper. Keep the native React
+      // control in place and insert siblings without moving it.
+      const parent=more.parentElement;
       if(!parent||!scope.contains(parent))return null;
-      return {anchor,parent};
+      return {anchor:more,parent};
     }
 
     function controls(scope,key,resolver,owner,options={}){
@@ -1303,7 +1298,7 @@
         const style=getComputedStyle(parent);
         // If this is a dedicated menu wrapper, make room for the buttons;
         // otherwise preserve the site's existing header layout.
-        if(parent.children.length===1){
+        if(parent.children.length===1||parent.classList.contains('meta-media-ig-more-row')){
           parent.classList.add('meta-media-ig-more-row');row=parent;
         }
         const reversed=getComputedStyle(parent).flexDirection==='row-reverse';
