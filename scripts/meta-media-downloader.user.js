@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.2.0
+// @version      6.3.0
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -12,6 +12,9 @@
 // @match        https://www.instagram.com/*
 // @match        https://instagram.com/*
 // @grant        GM_download
+// @grant        GM_xmlhttpRequest
+// @connect      fbcdn.net
+// @connect      cdninstagram.com
 // @noframes
 // @run-at       document-idle
 // @updateURL    none
@@ -59,6 +62,7 @@
   const ALLOWED_HOSTS = ['fbcdn.net', 'cdninstagram.com', 'threads.com', 'threads.net'];
   const installed = new WeakMap();
   const MORE_GAP = 8;
+  const metadataLimit = 64 * 1024 * 1024;
   let scanTimer = null;
   let captureMode = false;
   let captureStartedAt = 0;
@@ -156,7 +160,7 @@
     const attachments = carousel ? root.carousel_media : [root];
     const files = [], seen = new Set();
     let unavailableVideos = 0;
-    for (const raw of attachments.slice(0, 30)) {
+    for (const [position,raw] of attachments.slice(0, 30).entries()) {
       const item = raw?.node || raw?.media || raw;
       if (!item || typeof item !== 'object') continue;
       const versions = Array.isArray(item.video_versions) ? item.video_versions : [];
@@ -190,7 +194,7 @@
       const posters = isVideo ? (Array.isArray(item.image_versions2?.candidates)?
         item.image_versions2.candidates:[]).map(v=>mediaURL(v?.url||v?.src)).filter(Boolean)
         .map(threadsMediaPath).filter(Boolean) : [];
-      files.push({ type: isVideo ? 'video' : 'image', url, aliases, posters });
+      files.push({ type: isVideo ? 'video' : 'image', url, aliases, posters, position:position+1 });
     }
     return { files, total: attachments.length, unavailableVideos, carousel };
   }
@@ -200,6 +204,10 @@
   // containing_thread or direct_replies: those are different posts.
   function parsePostRecord(record) {
     const native = parseNativeMedia(record);
+    const postMeta={published:postDate(record.taken_at||record.taken_at_timestamp||record.media?.taken_at),
+      caption:typeof record.caption?.text==='string'?record.caption.text:
+        typeof record.media?.caption?.text==='string'?record.media.caption.text:null};
+    native.postMeta=postMeta;
     const linked = record.text_post_app_info?.linked_inline_media ||
       record.linked_inline_media || record.media?.text_post_app_info?.linked_inline_media;
     if (!linked || typeof linked !== 'object' || native.carousel ||
@@ -214,16 +222,17 @@
       }
     }
     const videoFiles = files.filter(file => file.type === 'video');
+    if(results.length>1)files.forEach((file,i)=>{file.position=results.every(r=>r.files.length===r.total)?i+1:null;});
     const unavailableVideos = results.reduce((sum,r) => sum + r.unavailableVideos,0);
     if (videoFiles.length) return {
       files, total:results.reduce((sum,r) => sum+r.total,0),
       unavailableVideos, carousel:results.some(r=>r.carousel)||items.length>1,
-      linked:true
+      linked:true,postMeta
     };
     // A linked video without a usable URL is not a downloadable still image.
-    if (unavailableVideos) return {files:[],total:0,unavailableVideos,carousel:false,linked:true};
+    if (unavailableVideos) return {files:[],total:0,unavailableVideos,carousel:false,linked:true,postMeta};
     if (!native.files.length && files.length)
-      return {files,total:files.length,unavailableVideos:0,carousel:files.length>1,linked:true};
+      return {files,total:files.length,unavailableVideos:0,carousel:files.length>1,linked:true,postMeta};
     return {...native,linked:true};
   }
 
@@ -304,7 +313,7 @@
       const mp4 = videoFromCanonicalMeta(doc);
       return mp4 ? {
         files: [{ type: 'video', url: mp4 }],
-        total: 1, unavailableVideos: 0, carousel: false, linked: structured.linked
+        total: 1, unavailableVideos: 0, carousel: false, linked: structured.linked, postMeta:structured.postMeta
       } : structured;
     } catch (_) {
       return null;
@@ -427,7 +436,7 @@
       return {result:[],unavailableVideos:Math.max(1,structured.unavailableVideos),
         embedded:true};
     }
-    return {result,embedded,
+    return {result,embedded,postMeta:structured.postMeta,total:useStructured?structured.total:null,
       unavailableVideos:useStructured?structured.unavailableVideos:unresolvedDOMVideos};
   }
 
@@ -494,12 +503,173 @@
     const matches=candidates.filter(({file})=>
       (snapshot.path&&(threadsMediaPath(file.url)===snapshot.path||(file.aliases||[]).includes(snapshot.path)))||
       (snapshot.poster&&(file.posters||[]).includes(snapshot.poster)));
-    if(matches.length===1)return {...matches[0].file,ordinal:matches[0].index+1};
+    if(matches.length===1)return {...matches[0].file,ordinal:matches[0].file.position||null};
     if(matches.length>1)return null;
     // A verified direct media URL is sufficient; never guess a different
     // slide from a list of videos, even if only one of them has a usable URL.
-    if(snapshot.url)return {type:snapshot.type,url:snapshot.url,ordinal:1};
+    if(snapshot.url)return {type:snapshot.type,url:snapshot.url,ordinal:null};
     return null;
+  }
+
+  // Shared local metadata writer. No re-encoding, no external libraries.
+  // Existing XMP is left untouched rather than destructively replaced.
+  function postDate(value) {
+    if(value===null||value===undefined||value==='')return null;
+    const n=typeof value==='number'||/^\d{10,13}$/.test(String(value))?Number(value):null;
+    const d=new Date(n===null?value:n<1e12?n*1000:n);
+    return Number.isFinite(d.getTime())&&d.getUTCFullYear()>=2000&&d.getTime()<=Date.now()+86400000?d.toISOString():null;
+  }
+  function twDate(value) {
+    const iso=postDate(value);
+    return iso?new Date(Date.parse(iso)+8*3600000).toISOString().slice(0,10).replace(/-/g,''):'unknown-date';
+  }
+  function metadataTime(scope) {
+    const dates=[...scope.querySelectorAll('time[datetime]')].map(t=>postDate(t.getAttribute('datetime'))).filter(Boolean);
+    const distinct=[...new Set(dates)];
+    return distinct.length===1?distinct[0]:null;
+  }
+  function mediaName(file,meta,extension) {
+    const clean=s=>safeFilenameSegment(s,'unknown').replace(/[. ]+$/,'')||'unknown';
+    const ordinal=Number.isInteger(meta.ordinal)&&meta.ordinal>0?String(meta.ordinal).padStart(2,'0'):'NA';
+    // Unknown ordinal must not be fabricated. A short stable path hash
+    // prevents different unknown attachments from sharing a filename.
+    let suffix=ordinal;
+    if(ordinal==='NA'){
+      let h=2166136261;for(const c of threadsMediaPath(file.url)||'')h=Math.imul(h^c.charCodeAt(0),16777619);
+      suffix+='-'+(h>>>0).toString(16).padStart(8,'0');
+    }
+    return [twDate(meta.published),meta.platform,clean(meta.account),suffix].join('_')+extension;
+  }
+  function xmlText(v) {
+    return String(v??'').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g,'')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+  }
+  function xmpPacket(meta) {
+    const fields={Platform:meta.platform,Account:meta.account,PostID:meta.code,PostURL:meta.source,
+      PublishedAt:meta.published,MediaOrdinal:meta.ordinal,MediaTotal:meta.total,
+      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.3.0',MediaKind:meta.kind};
+    const custom=Object.entries(fields).filter(([,v])=>v!==null&&v!==undefined&&v!=='')
+      .map(([k,v])=>'<mmd:'+k+'>'+xmlText(v)+'</mmd:'+k+'>').join('');
+    const description=meta.caption?'<dc:description><rdf:Alt><rdf:li xml:lang="x-default">'+xmlText(meta.caption)+'</rdf:li></rdf:Alt></dc:description>':'';
+    const creator=meta.account?'<dc:creator><rdf:Seq><rdf:li>'+xmlText(meta.account)+'</rdf:li></rdf:Seq></dc:creator>':'';
+    const source=meta.source?'<dc:source>'+xmlText(meta.source)+'</dc:source>':'';
+    return '<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'+
+      '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'+
+      '<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:mmd="https://github.com/kevinsmemo/tampermonkey-scripts/ns/1.0/">'+
+      creator+description+source+custom+'</rdf:Description></rdf:RDF></x:xmpmeta>\n<?xpacket end="w"?>';
+  }
+  function ascii(bytes,offset,n){
+    return String.fromCharCode(...bytes.subarray(offset,offset+n));
+  }
+  function joinBytes(...parts){
+    const out=new Uint8Array(parts.reduce((n,b)=>n+b.length,0));
+    let p=0;for(const b of parts){out.set(b,p);p+=b.length;}return out;
+  }
+  function crc32(bytes){
+    let c=0xffffffff;
+    for(const b of bytes){c^=b;for(let i=0;i<8;i++)c=(c>>>1)^((c&1)?0xedb88320:0);}
+    return (c^0xffffffff)>>>0;
+  }
+  function xmpEmbed(bytes,packet){
+    const encoder=new TextEncoder(),payload=encoder.encode(packet),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    if(payload.length>60000||bytes.length<12)return null;
+    if(bytes[0]===255&&bytes[1]===216){
+      let p=2,insert=2,scan=false;
+      while(p+4<=bytes.length){
+        if(bytes[p]!==255)return null;
+        const marker=bytes[p+1];
+        if(marker===0xda){scan=true;break;}
+        if(marker===0xd9)break;
+        const len=view.getUint16(p+2);
+        if(len<2||p+2+len>bytes.length)return null;
+        if(marker===0xe1&&ascii(bytes,p+4,Math.min(len-2,35)).startsWith('http://ns.adobe.com/xap/1.0/'))return null;
+        if(marker===0xe1&&ascii(bytes,p+4,Math.min(len-2,35)).startsWith('http://ns.adobe.com/xmp/extension/'))return null;
+        if(marker===0xe0||marker===0xe1)insert=p+2+len;
+        p+=2+len;
+      }
+      if(!scan||bytes[bytes.length-2]!==255||bytes[bytes.length-1]!==217)return null;
+      const data=joinBytes(encoder.encode('http://ns.adobe.com/xap/1.0/\0'),payload);
+      const header=new Uint8Array(4);header.set([255,225]);new DataView(header.buffer).setUint16(2,data.length+2);
+      return {bytes:joinBytes(bytes.subarray(0,insert),header,data,bytes.subarray(insert)),ext:'.jpg',mime:'image/jpeg'};
+    }
+    if(bytes[0]===137&&ascii(bytes,1,3)==='PNG'&&bytes[4]===13&&bytes[5]===10&&bytes[6]===26&&bytes[7]===10){
+      let p=8,insert=-1,hasHeader=false;
+      while(p+12<=bytes.length){
+        const len=view.getUint32(p),type=ascii(bytes,p+4,4);
+        if(len>bytes.length-p-12)return null;
+        if(type==='IHDR'&&p===8&&len===13)hasHeader=true;
+        if(['iTXt','tEXt','zTXt'].includes(type)&&ascii(bytes,p+8,Math.min(len,17))==='XML:com.adobe.xmp')return null;
+        if(type==='IEND'){if(len!==0||p+12!==bytes.length)return null;insert=p;break;}
+        p+=12+len;
+      }
+      if(!hasHeader||insert<0)return null;
+      const data=joinBytes(encoder.encode('XML:com.adobe.xmp\0\0\0\0\0'),payload);
+      const chunk=new Uint8Array(data.length+12),dv=new DataView(chunk.buffer);
+      dv.setUint32(0,data.length);chunk.set(encoder.encode('iTXt'),4);chunk.set(data,8);
+      dv.setUint32(8+data.length,crc32(chunk.subarray(4,8+data.length)));
+      return {bytes:joinBytes(bytes.subarray(0,insert),chunk,bytes.subarray(insert)),ext:'.png',mime:'image/png'};
+    }
+    // ISO BMFF MP4: append top-level Adobe XMP UUID, never move mdat/moov.
+    // Reject zero-size, extended-size, or malformed boxes and existing UUID
+    // XMP to avoid changing the meaning of any original byte offsets.
+    if(ascii(bytes,4,4)==='ftyp'){
+      const uuid=new Uint8Array([0xbe,0x7a,0xcf,0xcb,0x97,0xa9,0x42,0xe8,0x9c,0x71,0x99,0x94,0x91,0xe3,0xaf,0xac]);
+      let p=0,moov=false,mdat=false;
+      while(p+8<=bytes.length){
+        const size=view.getUint32(p),type=ascii(bytes,p+4,4);
+        if(size<8||size>bytes.length-p)return null;
+        if(type==='uuid'&&size>=24&&uuid.every((v,i)=>v===bytes[p+8+i]))return null;
+        if(type==='moov')moov=true;if(type==='mdat')mdat=true;
+        p+=size;
+      }
+      if(p!==bytes.length||!moov||!mdat)return null;
+      const box=new Uint8Array(24+payload.length);new DataView(box.buffer).setUint32(0,box.length);
+      box.set(encoder.encode('uuid'),4);box.set(uuid,8);box.set(payload,24);
+      return {bytes:joinBytes(bytes,box),ext:'.mp4',mime:'video/mp4'};
+    }
+    return null;
+  }
+  function metadataHost(raw){
+    try{const u=new URL(raw);return u.protocol==='https:'&&/(?:^|\.)(?:fbcdn\.net|cdninstagram\.com)$/i.test(u.hostname);}catch(_){return false;}
+  }
+  function readMediaForMetadata(url){
+    return new Promise(resolve=>{
+      if(typeof GM_xmlhttpRequest!=='function'||!metadataHost(url)){resolve(null);return;}
+      let request,finished=false;
+      const done=v=>{if(!finished){finished=true;resolve(v);}};
+      try{
+        request=GM_xmlhttpRequest({method:'GET',url,responseType:'arraybuffer',anonymous:true,timeout:25000,
+          onprogress:e=>{if(e.loaded>metadataLimit||(e.lengthComputable&&e.total>metadataLimit)){done(null);try{request?.abort();}catch(_){}}},
+          onload:r=>done(r.status===200&&metadataHost(r.finalUrl||url)&&r.response instanceof ArrayBuffer&&r.response.byteLength<=metadataLimit?new Uint8Array(r.response):null),
+          onerror:()=>done(null),ontimeout:()=>done(null),onabort:()=>done(null)});
+      }catch(_){done(null);}
+    });
+  }
+  async function saveMedia(file,meta,valid=()=>true){
+    const ext=mediaExtension(file.url,file.type);
+    // No extra read for formats this version cannot safely rewrite.
+    if(['.jpg','.jpeg','.png','.mp4'].includes(ext)&&metadataHost(file.url)){
+      let blob=null,finalExt=ext;
+      try{
+        const raw=await readMediaForMetadata(file.url);
+        if(!valid())return 'cancelled';
+        if(raw){
+          const result=xmpEmbed(raw,xmpPacket(meta));
+          if(result&&((file.type==='video')===(result.mime==='video/mp4'))){
+            blob=new Blob([result.bytes],{type:result.mime});finalExt=result.ext;
+          }
+        }
+      }catch(_){}
+      if(blob&&valid()){
+        // A failed Blob save may be an older Tampermonkey build. Retry once
+        // via the original proven download path; do not alter original bytes.
+        try{await downloadOne(blob,mediaName(file,meta,finalExt));return 'metadata';}catch(_){}
+      }
+    }
+    if(!valid())return 'cancelled';
+    await downloadOne(file.url,mediaName(file,meta,ext));
+    return 'original';
   }
 
   async function downloadPost(event,card,identity,group,button,mode) {
@@ -532,19 +702,25 @@
           '找不到可下載的媒體直連，請開啟原始貼文再試';
         return;
       }
-      const stamp=getTimestamp(card);
+      const published=data.postMeta?.published||metadataTime(card);
+      const common={platform:'Threads',account:identity.user,code:identity.code,
+        source:'https://www.threads.com/@'+encodeURIComponent(identity.user)+'/post/'+encodeURIComponent(identity.code),
+        published,caption:data.postMeta?.caption||null,total:data.total,kind:'post',downloadedAt:new Date().toISOString()};
+      let originalOnly=0;
       for(let i=0;i<files.length;i++){
         if(!valid())return;
         const file=files[i];
         button.title='下載 '+(i+1)+'/'+files.length;
-        const name='Threads-'+safeFilenameSegment(identity.user)+'-'+stamp+'-'+
-          (file.ordinal||i+1)+mediaExtension(file.url,file.type);
-        try{await downloadOne(file.url,name);}catch(_){failures++;}
+        try{
+          const status=await saveMedia(file,{...common,ordinal:file.position||file.ordinal||
+            (data.total===1?1:null)},valid);
+          if(status==='original')originalOnly++;
+        }catch(_){failures++;}
       }
       const partial=mode==='all'&&data.unavailableVideos;
       downloadIcon(button,failures||partial?'error':'done');
       button.title=failures?'下載失敗 '+failures+'/'+files.length:
-        partial?'部分完成：部分影片沒有直連':'已下載 '+files.length+' 個媒體';
+        partial?'部分完成：部分影片沒有直連':'已下載 '+files.length+' 個媒體'+(originalOnly?'（'+originalOnly+' 個保留原檔，未寫入新中繼資料）':'');
     }catch(_){
       downloadIcon(button,'error');button.title='下載失敗';
     }finally{
@@ -903,7 +1079,10 @@
       }
       return {files,total:attachments.length,missing,
         owner:root.user?.username||root.owner?.username||null,
-        taken:root.taken_at||root.taken_at_timestamp||null};
+        taken:root.taken_at||root.taken_at_timestamp||null,
+        code:root.code||root.shortcode||null,
+        caption:typeof root.caption?.text==='string'?root.caption.text:
+          typeof root.edge_media_to_caption?.edges?.[0]?.node?.text==='string'?root.edge_media_to_caption.edges[0].node.text:null};
     }
 
     function igRecordMatches(record,code,id) {
@@ -1114,11 +1293,11 @@
       const embedded=igCollect(document,identity);
       let file=matchCurrent(snapshot,embedded);
       if(!file&&snapshot.url)file={type:snapshot.type,url:snapshot.url,
-        position:snapshot.index>=0?snapshot.index+1:1};
-      if(file)return {files:[file],missing:0,owner:embedded.owner,taken:embedded.taken};
+        position:null};
+      if(file)return {...embedded,files:[file],missing:0,code:identity.code};
       const resolved=await resolvePost(scope,identity);
       file=matchCurrent(snapshot,resolved);
-      return {files:file?[file]:[],missing:file?0:1,owner:resolved.owner,taken:resolved.taken};
+      return {...resolved,files:file?[file]:[],missing:file?0:1,code:identity.code};
     }
 
     async function resolvePost(scope,identity){
@@ -1298,17 +1477,30 @@
             button.title='無法安全辨識目前媒體；請切換至完整畫面或播放影片再試。';return;
           }
           if(mode==='open'){tab.location.replace(files[0].url);icon(button,'done');button.title='已開啟原始媒體';return;}
-          const user=safeFilenameSegment(owner||username(scope,data),'Instagram'),stamp=timestamp(scope,data);
-          let failed=0;
+          const known=key.startsWith('post:')?key.slice(5):null;
+          const code=known||data.code||null;
+          const story=key.startsWith('story:'),avatar=key.startsWith('avatar:');
+          const account=owner||data.owner||(scope.closest('article')?username(scope,data):null);
+          const source=story?'https://www.instagram.com'+currentPath:
+            avatar?'https://www.instagram.com/'+encodeURIComponent(owner)+'/':
+            code&&/^[A-Za-z0-9_-]{3,24}$/.test(code)?'https://www.instagram.com/p/'+code+'/':null;
+          const common={platform:'IG',account:account==='Instagram'?null:account,code:story||avatar?null:code,
+            source,published:postDate(data.taken)||(scope.closest('article')?metadataTime(scope):null),
+            caption:data.caption||null,total:data.domOnly?null:data.total,
+            kind:story?(currentPath.startsWith('/stories/highlights/')?'highlight':'story'):avatar?'avatar':'post',
+            downloadedAt:new Date().toISOString()};
+          const stillValid=()=>currentPath===location.pathname&&group.isConnected&&validate();
+          let failed=0,originalOnly=0;
           for(let i=0;i<files.length;i++){
             button.title='下載 '+(i+1)+'/'+files.length;
-            const ordinal=files[i].position||i+1;
-            try{await downloadOne(files[i].url,'Instagram-'+user+'-'+stamp+'-'+ordinal+mediaExtension(files[i].url,files[i].type));}
+            if(!stillValid())return;
+            const ordinal=files[i].position||(common.total===1||avatar?1:null);
+            try{const status=await saveMedia(files[i],{...common,ordinal},stillValid);if(status==='original')originalOnly++;}
             catch(_){failed++;}
           }
           icon(button,failed||data.missing?'error':'done');
           button.title=failed?'失敗 '+failed+'/'+files.length:
-            data.missing?'部分完成：部分媒體未能辨識':'已下載 '+files.length+' 個媒體';
+            data.missing?'部分完成：部分媒體未能辨識':'已下載 '+files.length+' 個媒體'+(originalOnly?'（'+originalOnly+' 個保留原檔，未寫入新中繼資料）':'');
         }catch(_){if(tab)tab.close();icon(button,'error');button.title='下載失敗';}
         finally{setTimeout(()=>{
           busy=false;current.disabled=false;if(all)all.disabled=false;
@@ -1375,10 +1567,10 @@
       const exact=uniqueVideoIdentity(snapshot);
       if(exact){
         if(all)return {...exact.data,missing:Math.max(exact.data.missing||0,exact.data.total-exact.data.files.length)};
-        return {files:[exact.file],missing:0,owner:exact.data.owner,taken:exact.data.taken};
+        return {...exact.data,files:[exact.file],missing:0,code:exact.code};
       }
       // A direct URL establishes only the current media, not completeness.
-      if(snapshot.url)return {files:[{type:'video',url:snapshot.url,position:1}],missing:all?1:0};
+      if(snapshot.url)return {files:[{type:'video',url:snapshot.url,position:null}],missing:all?1:0};
       return {files:[],missing:1};
     }
     function bindUnidentifiedVideo(scope,frame){
@@ -1456,21 +1648,21 @@
         const embedded=igCollect(document,target.id);
         const match=matchCurrent(snap,embedded);
         if(all&&match&&embedded.files.length===embedded.total&&!embedded.missing)return embedded;
-        if(!all&&match)return {files:[match],missing:0,owner:embedded.owner,taken:embedded.taken};
+        if(!all&&match)return {...embedded,files:[match],missing:0,code:target.id.code};
         if(all||!snap.url){
           const frame=mediaHost(target.scope)||video.parentElement;
           const data=await resolvePost(target.scope,target.id);
           const exact=matchCurrent(snap,data);
           if(all&&exact&&!data.domOnly)return {...data,missing:Math.max(data.missing||0,data.total-data.files.length)};
-          if(!all&&exact)return {files:[exact],missing:0,owner:data.owner,taken:data.taken};
+          if(!all&&exact)return {...data,files:[exact],missing:0,code:target.id.code};
         }
       }
       const exact=uniqueVideoIdentity(snap);
       if(exact){
         if(all)return {...exact.data,missing:Math.max(exact.data.missing||0,exact.data.total-exact.data.files.length)};
-        return {files:[exact.file],missing:0,owner:exact.data.owner,taken:exact.data.taken};
+        return {...exact.data,files:[exact.file],missing:0,code:exact.code};
       }
-      if(snap.url)return {files:[{type:'video',url:snap.url,position:1}],missing:all?1:0};
+      if(snap.url)return {files:[{type:'video',url:snap.url,position:null}],missing:all?1:0};
       return {files:[],missing:1};
     }
     function normalVideoToolbar(video){
@@ -1640,8 +1832,8 @@
     window.addEventListener('scroll',scheduleVideoFallbacks,{passive:true,capture:true});
     for(const event of ['loadedmetadata','loadeddata','play','playing','resize'])document.addEventListener(event,e=>{if(e.target?.tagName==='VIDEO')scheduleIG();},true);
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.2.0 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.3.0 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.2.0 Threads loaded');
+  console.info('[Meta Media Downloader] 6.3.0 Threads loaded');
 })();
