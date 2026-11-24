@@ -552,7 +552,7 @@
     const custom=Object.entries(fields).filter(([,v])=>v!==null&&v!==undefined&&v!=='')
       .map(([k,v])=>'<mmd:'+k+'>'+xmlText(v)+'</mmd:'+k+'>').join('');
     const description=meta.caption?'<dc:description><rdf:Alt><rdf:li xml:lang="x-default">'+xmlText(meta.caption)+'</rdf:li></rdf:Alt></dc:description>':'';
-    const creator=meta.account?'<dc:creator><rdf:Seq><rdf:li>'+xmlText(meta.account)+'</rdf:li></rdf:Seq></dc:creator>':'';
+    const creator=meta.account&&meta.account!=='unknown'?'<dc:creator><rdf:Seq><rdf:li>'+xmlText(meta.account)+'</rdf:li></rdf:Seq></dc:creator>':'';
     const source=meta.source?'<dc:source>'+xmlText(meta.source)+'</dc:source>':'';
     return '<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'+
       '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'+
@@ -615,6 +615,11 @@
     // XMP to avoid changing the meaning of any original byte offsets.
     if(ascii(bytes,4,4)==='ftyp'){
       const uuid=new Uint8Array([0xbe,0x7a,0xcf,0xcb,0x97,0xa9,0x42,0xe8,0x9c,0x71,0x99,0x94,0x91,0xe3,0xaf,0xac]);
+      // Some producers put an XMP UUID inside moov/udta rather than at
+      // the top level. Conservatively preserve those files as-is.
+      for(let at=bytes.indexOf(uuid[0]);at>=0;at=bytes.indexOf(uuid[0],at+1)){
+        if(at+uuid.length<=bytes.length&&uuid.every((v,i)=>v===bytes[at+i]))return null;
+      }
       let p=0,moov=false,mdat=false;
       while(p+8<=bytes.length){
         const size=view.getUint32(p),type=ascii(bytes,p+4,4);
@@ -1081,6 +1086,7 @@
         owner:root.user?.username||root.owner?.username||null,
         taken:root.taken_at||root.taken_at_timestamp||null,
         code:root.code||root.shortcode||null,
+        postKind:root.product_type==='clips'?'reel':null,
         caption:typeof root.caption?.text==='string'?root.caption.text:
           typeof root.edge_media_to_caption?.edges?.[0]?.node?.text==='string'?root.edge_media_to_caption.edges[0].node.text:null};
     }
@@ -1483,7 +1489,9 @@
           const account=owner||data.owner||(scope.closest('article')?username(scope,data):null);
           const source=story?'https://www.instagram.com'+currentPath:
             avatar?'https://www.instagram.com/'+encodeURIComponent(owner)+'/':
-            code&&/^[A-Za-z0-9_-]{3,24}$/.test(code)?'https://www.instagram.com/p/'+code+'/':null;
+            code&&/^[A-Za-z0-9_-]{3,24}$/.test(code)?
+              'https://www.instagram.com/'+(igIdentity(location.href)?.code===code?
+                igIdentity(location.href).kind:data.postKind==='reel'?'reel':'p')+'/'+code+'/':null;
           const common={platform:'IG',account:account==='Instagram'?null:account,code:story||avatar?null:code,
             source,published:postDate(data.taken)||(scope.closest('article')?metadataTime(scope):null),
             caption:data.caption||null,total:data.domOnly?null:data.total,
