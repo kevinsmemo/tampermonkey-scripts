@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.1.0
+// @version      6.1.1
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -770,13 +770,20 @@
     const css=document.createElement('style');
     css.textContent=[
       '.meta-media-ig-anchor{position:relative!important}',
-      '.'+CLASS+'{position:absolute;top:15px;right:15px;display:flex;flex-direction:row-reverse;align-items:center;gap:8px;z-index:5;line-height:0;background:rgba(0,0,0,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:6px 8px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.1);box-sizing:border-box}',
+      '.'+CLASS+'{position:absolute;top:15px;right:15px;display:flex;flex-direction:row;align-items:center;gap:8px;z-index:5;line-height:0;background:rgba(0,0,0,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:6px 8px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.1);box-sizing:border-box}',
       '.'+CLASS+' button{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;min-width:26px;box-sizing:border-box;padding:4px;border:0;border-radius:6px;background:transparent;color:white;cursor:pointer;line-height:0}',
       '.'+CLASS+' button:hover{background:rgba(255,255,255,.25)}',
       '.'+CLASS+' button:disabled{opacity:.6;cursor:wait}',
       '.'+CLASS+' button:focus-visible{outline:2px solid white;outline-offset:2px}',
       '.'+CLASS+' svg{display:block;width:18px;height:18px;flex:none}',
-      '.'+CLASS+'-floating{position:fixed;top:72px;right:18px;z-index:9999}'
+      '.'+CLASS+'-floating{position:fixed;top:72px;right:18px;z-index:9999}',
+      '.'+CLASS+'-header{position:static;display:inline-flex;flex-direction:row;align-items:center;justify-content:center;flex:0 0 auto;gap:8px;margin:0 8px 0 0;padding:0;border:0;border-radius:0;box-shadow:none;background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;z-index:auto}',
+      '.'+CLASS+'-header button{color:inherit;width:28px;height:28px;min-width:28px;padding:3px}',
+      '.'+CLASS+'-header button:hover{background:rgba(128,128,128,.15)}',
+      '.'+CLASS+'-header svg{width:22px;height:22px}',
+      '.'+CLASS+'-header button:focus-visible{outline-color:currentColor}',
+      '.meta-media-ig-more-row{display:flex!important;flex-direction:row!important;align-items:center!important;flex:0 0 auto!important;width:auto!important;min-width:0!important;white-space:nowrap!important}'
+
     ].join('');
     (document.head||document.documentElement).append(css);
     const icons={
@@ -1180,14 +1187,60 @@
       return getTimestamp(scope||document);
     }
 
+    // Find the actual native post menu, including a label on its inner SVG.
+    // The media frame is retained for current-slide detection, independently
+    // of where the two controls are mounted.
+    function postMoreControl(scope,frame){
+      const owner=scope.closest('article');
+      const media=frame.getBoundingClientRect(),box=scope.getBoundingClientRect();
+      const seen=new Set(),candidates=[];
+      for(const el of scope.querySelectorAll('button,[role="button"],[aria-label],svg[aria-label],svg title')){
+        const label=[el.getAttribute('aria-label'),el.getAttribute('title'),
+          el.tagName.toLowerCase()==='title'?el.textContent:null].filter(Boolean);
+        if(!label.some(x=>/^(?:more(?: options)?|post options|更多(?:選項|操作)?|其他選項|更多選擇|⋯|…|\.{3})$/i.test(x.trim())))continue;
+        const control=el.closest('button,[role="button"]');
+        if(!control||seen.has(control)||!scope.contains(control)||control.closest('.'+CLASS))continue;
+        if(owner&&control.closest('article')!==owner)continue;
+        const r=control.getBoundingClientRect();
+        if(r.width<12||r.height<12||r.width>80||r.height>80)continue;
+        // Only header menus above (or immediately alongside the top of)
+        // this media, not comment menus and player controls farther below.
+        const cy=r.top+r.height/2;
+        if(cy<box.top-4||cy>media.top+24||r.right<box.left+box.width*.55)continue;
+        if(frame.contains(control))continue;
+        seen.add(control);
+        candidates.push({control,header:!!control.closest('header'),cy,right:r.right});
+      }
+      candidates.sort((a,b)=>Number(b.header)-Number(a.header)||a.cy-b.cy||b.right-a.right);
+      return candidates[0]?.control||null;
+    }
+    function menuInsertion(more,scope){
+      // Climb only menu-only wrappers, never the entire header. Inserting
+      // alongside the wrapper lets the existing header flex layout resize.
+      let anchor=more;
+      for(let i=0;i<5;i++){
+        const p=anchor.parentElement;
+        if(!p||p===scope||p.matches('header,article,main')||p.children.length!==1)break;
+        const r=p.getBoundingClientRect();
+        if(r.width>88||r.height>88)break;
+        anchor=p;
+      }
+      const parent=anchor.parentElement;
+      if(!parent||!scope.contains(parent))return null;
+      return {anchor,parent};
+    }
+
     function controls(scope,key,resolver,owner,options={}){
-      const {host=scope,floating=false,validate=()=>true,allResolver=null}=options;
+      const {host=scope,floating=false,validate=()=>true,allResolver=null,more=null}=options;
+      const slot=more?menuInsertion(more,scope):null;
       const existing=scope?bound.get(scope):null;
-      if(existing?.key===key&&existing.group.isConnected&&existing.host===host)return;
-      if(existing)existing.group.remove();
+      if(existing?.key===key&&existing.group.isConnected&&existing.host===host&&existing.more===more&&
+         (!slot||existing.group.parentElement===slot.parent))return;
+      if(existing){existing.group.remove();existing.row?.classList.remove('meta-media-ig-more-row');}
       if(!floating&&(!host||!host.isConnected))return;
+      if(more&&!slot)return;
       const group=document.createElement('div');
-      group.className=CLASS+(floating?' '+CLASS+'-floating':'');
+      group.className=CLASS+(floating?' '+CLASS+'-floating':slot?' '+CLASS+'-header':'');
       group.dataset.metaMediaKey=key;
       const current=document.createElement('button');
       current.type='button';current.dataset.action='current';
@@ -1243,18 +1296,31 @@
       current.addEventListener('click',e=>act(e,'current'));
       if(all)all.addEventListener('click',e=>act(e,'all'));
       groupActions.set(group,{act,all:!!all});
+      let row=null;
       if(floating)document.body.append(group);
+      else if(slot){
+        const {parent,anchor}=slot;
+        const style=getComputedStyle(parent);
+        // If this is a dedicated menu wrapper, make room for the buttons;
+        // otherwise preserve the site's existing header layout.
+        if(parent.children.length===1){
+          parent.classList.add('meta-media-ig-more-row');row=parent;
+        }
+        const reversed=getComputedStyle(parent).flexDirection==='row-reverse';
+        if(reversed)anchor.after(group);else anchor.before(group);
+      }
       else{
         if(getComputedStyle(host).position==='static')host.classList.add('meta-media-ig-anchor');
         host.append(group);
       }
-      if(scope)bound.set(scope,{key,group,host});
+      if(scope)bound.set(scope,{key,group,host,more,row});
     }
 
     function scan(){
       scanPending=false;
       if(previousPath!==location.pathname){
         document.querySelectorAll('.'+CLASS).forEach(e=>e.remove());
+        document.querySelectorAll('.meta-media-ig-more-row').forEach(e=>e.classList.remove('meta-media-ig-more-row'));
         previousPath=location.pathname;
       }
       const story=storyIdentity();
@@ -1280,8 +1346,14 @@
         if(!id)continue;
         const frame=mediaHost(article);
         if(!frame)continue;
+        const more=postMoreControl(article,frame);
+        if(!more){
+          const previous=bound.get(article);
+          if(previous){previous.group.remove();previous.row?.classList.remove('meta-media-ig-more-row');bound.delete(article);}
+          continue;
+        }
         controls(article,'post:'+id.code,()=>resolveCurrent(article,id,frame),null,{
-          host:frame,allResolver:()=>resolvePost(article,id),
+          host:frame,more,allResolver:()=>resolvePost(article,id),
           validate:()=>article.isConnected&&frame.isConnected&&article.contains(frame)&&postIdentity(article)?.code===id.code
         });
       }
@@ -1294,7 +1366,7 @@
            [...main.querySelectorAll('video')].filter(visible).length<=1){
           const frame=mediaHost(main);
           if(frame)controls(main,'post:'+route.code,()=>resolveCurrent(main,route,frame),null,{
-            host:frame,allResolver:()=>resolvePost(main,route),
+            host:frame,more:postMoreControl(main,frame),allResolver:()=>resolvePost(main,route),
             validate:()=>main.isConnected&&frame.isConnected&&main.contains(frame)&&igIdentity(location.href)?.code===route.code&&igURLs(main).size<=1&&(!igURLs(main).size||igURLs(main).has(route.code))
           });
         }
@@ -1319,8 +1391,8 @@
     window.addEventListener('popstate',scheduleIG);
     window.addEventListener('resize',scheduleIG,{passive:true});
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.1.0 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.1.1 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.1.0 Threads loaded');
+  console.info('[Meta Media Downloader] 6.1.1 Threads loaded');
 })();
