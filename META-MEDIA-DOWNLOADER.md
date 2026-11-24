@@ -1,4 +1,4 @@
-# Meta Media Downloader 6.3.0
+# Meta Media Downloader 6.4.0
 
 Single userscript for Threads and Instagram. Built on the previously verified Threads 5.2.0 source (Git blob 99853fec54cef076c3a182958c848d5afc17d2f0). The original file and its branch are unchanged. The site dispatcher activates just one platform module.
 
@@ -34,3 +34,9 @@ Threads implementation retains its original MIT attribution. Reviewed user-expor
 - Lossless XMP for JPEG APP1, PNG iTXt, MP4 top-level Adobe UUID. The original compressed content is not re-encoded. Exact post data, when available, supplies account, caption, published time, shortcode, post URL and ordinal/total; download time and tool version are recorded separately. Some metadata is unavailable on certain pages. Finder may not display custom XMP fields.
 - New GM_xmlhttpRequest permission restricted to fbcdn.net and cdninstagram.com, anonymous read only on a user download action, no third-party calls. 64 MiB limit and 25-second timeout for metadata reads. Existing XMP, unsupported types, oversized media, failed reads and failed Blob saves retain direct original download. Metadata writer does not merge existing XMP or write WebP/GIF/AVIF in this version. GM_download Blob support depends on Tampermonkey version.
 - Synthetic binary tests and mock download/fallback checks passed; actual browser and file-viewer interoperability is not yet verified.
+
+## 6.4.0: Threads feed and media viewer
+- Feed/post headers expose only download all. The media viewer exposes current and all (left to right), with a compact top-right floating toolbar that avoids the native close button when identified.
+- Viewer identity comes from the exact /media route, a unique viewer link, or a recent explicit click on media in a single identified post. Current media is sampled at click time in the actual viewer, with viewport/clipping/hit-test checks. No ordinal is invented if exact file matching fails.
+- Copy as image removes feed and viewer controls. Instagram and the 6.3.0 filename/XMP implementations remain intact (version provenance updated). No new permissions.
+- Synthetic identity/route and isolation checks passed. The current browser tab showed the ordinary feed, not the opened viewer; live viewer layout and download verification remain outstanding.
