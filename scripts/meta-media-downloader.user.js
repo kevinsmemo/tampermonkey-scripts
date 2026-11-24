@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.4.2
+// @version      6.4.3
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -553,7 +553,7 @@
   function xmpPacket(meta) {
     const fields={Platform:meta.platform,Account:meta.account,PostID:meta.code,PostURL:meta.source,
       PublishedAt:meta.published,MediaOrdinal:meta.ordinal,MediaTotal:meta.total,
-      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.4.2',MediaKind:meta.kind};
+      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.4.3',MediaKind:meta.kind};
     const custom=Object.entries(fields).filter(([,v])=>v!==null&&v!==undefined&&v!=='')
       .map(([k,v])=>'<mmd:'+k+'>'+xmlText(v)+'</mmd:'+k+'>').join('');
     const description=meta.caption?'<dc:description><rdf:Alt><rdf:li xml:lang="x-default">'+xmlText(meta.caption)+'</rdf:li></rdf:Alt></dc:description>':'';
@@ -1251,7 +1251,7 @@
   // or Instagram Download Button implementation, resources or runtime libraries.
   function initInstagram() {
     const CLASS='meta-media-ig-tools',bound=new WeakMap(),groupActions=new WeakMap();
-    const videoFallbacks=new Map();
+    const videoFallbacks=new Map(),mediaToolbars=new Map();
     let fallbackLayoutPending=false;
     const css=document.createElement('style');
     css.textContent=[
@@ -1269,7 +1269,11 @@
       '.'+CLASS+'-header svg{width:22px;height:22px}',
       '.'+CLASS+'-header button:focus-visible{outline-color:currentColor}',
       '.'+CLASS+'-video-portal{position:fixed!important;top:0;left:0;right:auto;margin:0;z-index:2147483000;pointer-events:auto;flex-direction:row;gap:6px;padding:3px 5px;border-radius:8px}',
-      '.'+CLASS+'-video-portal[hidden]{display:none!important}',
+      '.'+CLASS+'-media-overlay{position:absolute!important;top:12px;right:12px;z-index:10;background:rgba(0,0,0,.45);padding:4px 6px;border:0;border-radius:9px;box-shadow:none;gap:8px}',
+      '.'+CLASS+'-media-overlay button,.'+CLASS+'-video-portal button{width:28px;height:28px;min-width:28px;padding:3px}',
+      '.'+CLASS+'-media-overlay svg,.'+CLASS+'-video-portal svg{width:22px;height:22px}',
+      '.'+CLASS+'-video-portal{background:rgba(0,0,0,.45);padding:4px 6px;border:0;border-radius:9px;box-shadow:none;gap:8px}',
+      '.'+CLASS+'-media-overlay[hidden],.'+CLASS+'-video-portal[hidden]{display:none!important}',
       '.meta-media-ig-more-row{display:flex!important;flex-direction:row!important;align-items:center!important;flex:0 0 auto!important;width:auto!important;min-width:0!important;white-space:nowrap!important}'
 
     ].join('');
@@ -1712,16 +1716,17 @@
 
     function controls(scope,key,resolver,owner,options={}){
       const {host=scope,floating=false,validate=()=>true,allResolver=null,more=null,portal=false}=options;
-      const slot=more?menuInsertion(more,scope):null;
+      const mediaOverlay=!floating&&!portal&&!key.startsWith('avatar:');
+      // Post buttons belong to the media, never the native header menu.
+      const slot=!mediaOverlay&&more?menuInsertion(more,scope):null;
       const existing=scope?bound.get(scope):null;
-      if(existing?.key===key&&existing.group.isConnected&&existing.host===host&&existing.more===more&&
+      if(existing?.key===key&&existing.group.isConnected&&existing.host===host&&(mediaOverlay||existing.more===more)&&
          (!slot||existing.group.parentElement===slot.parent))return;
-      if(existing){existing.group.remove();existing.row?.classList.remove('meta-media-ig-more-row');}
+      if(existing){mediaToolbars.delete(existing.group);existing.group.remove();existing.row?.classList.remove('meta-media-ig-more-row');}
       if(!floating&&(!host||!host.isConnected))return;
       // If the native menu wrapper is unavailable, retain the media overlay.
       const group=document.createElement('div');
-      group.className=CLASS+(portal?' '+CLASS+'-video-portal':floating?' '+CLASS+'-floating':slot?' '+CLASS+'-header':'');
-      if(!slot&&!floating&&!portal&&key!=='avatar:'+owner&&host.querySelector('video'))group.style.top='60px';
+      group.className=CLASS+(portal?' '+CLASS+'-video-portal':floating?' '+CLASS+'-floating':mediaOverlay?' '+CLASS+'-media-overlay':slot?' '+CLASS+'-header':'');
       group.dataset.metaMediaKey=key;
       const current=document.createElement('button');
       current.type='button';current.dataset.action='current';
@@ -1810,6 +1815,10 @@
         host.append(group);
       }
       if(scope)bound.set(scope,{key,group,host,more,row});
+      if(mediaOverlay){
+        const entry={group,scope,host,validate};mediaToolbars.set(group,entry);
+        positionMediaOverlay(entry);
+      }
       return group;
     }
 
@@ -1962,27 +1971,73 @@
       }
       return false;
     }
+    function igPaintedBounds(node,clip){
+      const box=node.getBoundingClientRect(),st=getComputedStyle(node);
+      const video=node.tagName==='VIDEO';
+      const painted=paintedMediaRect(box,video?node.videoWidth:node.naturalWidth,
+        video?node.videoHeight:node.naturalHeight,st.objectFit,st.objectPosition);
+      return intersection(painted,clip);
+    }
+    function igInsetPosition(media,w,h,menu=null){
+      // The right corner remains the preferred location, even for video
+      // overlays. If the native menu occupies it, move below that menu.
+      const gx=Math.min(12,Math.max(0,(media.width-w)/2)),gy=Math.min(12,Math.max(0,(media.height-h)/2));
+      const left=media.right-w-gx;
+      let top=media.top+gy;
+      if(menu){
+        const hit=intersection({left:left-4,right:left+w+4,top:top-4,bottom:top+h+4},menu);
+        if(hit.width&&hit.height&&menu.bottom+8+h<=media.bottom)top=menu.bottom+8;
+      }
+      return {left,top};
+    }
+    function positionMediaOverlay(entry){
+      const {scope,host,group}=entry;
+      if(!group.isConnected||!host.isConnected||!scope.isConnected){mediaToolbars.delete(group);group.remove();return;}
+      if(!entry.validate()){group.hidden=true;return;}
+      let selected=captureCurrent(host);
+      // During slide transitions keep the all-media control attached to the
+      // largest painted slide. This is layout only, never download selection.
+      if(!selected){
+        selected=mediaNodes(host).map(node=>({node,rect:clippedRect(node,host)}))
+          .sort((a,b)=>b.rect.width*b.rect.height-a.rect.width*a.rect.height)[0];
+      }
+      if(!selected){group.hidden=true;return;}
+      const viewport={left:0,top:0,right:innerWidth,bottom:innerHeight};
+      const media=intersection(igPaintedBounds(selected.node,selected.rect),viewport);
+      if(media.width<80||media.height<45){group.hidden=true;return;}
+      group.hidden=false;
+      const w=group.offsetWidth||76,h=group.offsetHeight||36;
+      if(media.width<w||media.height<h){group.hidden=true;return;}
+      const menu=postMoreControl(scope,host)?.getBoundingClientRect();
+      const pos=igInsetPosition(media,w,h,menu);
+      const parent=group.offsetParent||host,box=parent.getBoundingClientRect();
+      // Absolute coordinates are relative to the actual containing block,
+      // not the article header or the full media wrapper.
+      group.style.right='auto';
+      group.style.left=Math.round(pos.left-box.left-(parent.clientLeft||0)+(parent.scrollLeft||0))+'px';
+      group.style.top=Math.round(pos.top-box.top-(parent.clientTop||0)+(parent.scrollTop||0))+'px';
+    }
     function positionVideoFallback(video,entry){
       const r=playableRect(video);
       if(!r||normalVideoToolbar(video)){entry.group.hidden=true;return;}
-      const {menu}=localVideoTarget(video);
-      const mr=menu?.getBoundingClientRect();
+      const viewport={left:0,top:0,right:innerWidth,bottom:innerHeight};
+      const media=igPaintedBounds(video,intersection(r,viewport));
+      if(media.width<80||media.height<45){entry.group.hidden=true;return;}
       entry.group.hidden=false;
-      const w=entry.group.offsetWidth||76,h=entry.group.offsetHeight||34;
-      // If native menu is visible, align both icons immediately to its left.
-      // Otherwise use a safe spot below the video header, avoiding Follow/More.
-      const menuVisible=mr&&mr.width>0&&mr.height>0&&mr.top>=0&&mr.bottom<=innerHeight;
-      const x=menuVisible?mr.left-w-6:r.right-w-10;
-      const y=menuVisible?mr.top+(mr.height-h)/2:r.top+48;
-      if(y<0||y+h>innerHeight){entry.group.hidden=true;return;}
-      const hit=document.elementFromPoint(Math.max(0,Math.min(innerWidth-1,r.left+r.width/2)),Math.max(0,Math.min(innerHeight-1,Math.max(r.top,0)+Math.min(r.height/2,Math.max(20,(innerHeight-Math.max(r.top,0))/2)))));
-      // Do not draw over unrelated modal dialogs.
-      if(hit?.closest('[role="dialog"],[aria-modal="true"]')&&!hit.closest('[role="dialog"],[aria-modal="true"]').contains(video)){entry.group.hidden=true;return;}
-      entry.group.style.left=Math.round(Math.max(4,Math.min(innerWidth-w-4,x)))+'px';
-      entry.group.style.top=Math.round(y)+'px';
+      const w=entry.group.offsetWidth||76,h=entry.group.offsetHeight||36;
+      if(media.width<w||media.height<h){entry.group.hidden=true;return;}
+      const menu=localVideoTarget(video).menu?.getBoundingClientRect();
+      const pos=igInsetPosition(media,w,h,menu);
+      const hit=document.elementFromPoint(media.left+media.width/2,media.top+media.height/2);
+      const dialog=hit?.closest('[role="dialog"],[aria-modal="true"]');
+      if(dialog&&!dialog.contains(video)){entry.group.hidden=true;return;}
+      entry.group.style.right='auto';
+      entry.group.style.left=Math.round(pos.left)+'px';
+      entry.group.style.top=Math.round(pos.top)+'px';
     }
     function reconcileVideoFallbacks(){
       fallbackLayoutPending=false;
+      for(const entry of mediaToolbars.values())positionMediaOverlay(entry);
       if(storyIdentity()){
         for(const entry of videoFallbacks.values())entry.group.remove();
         videoFallbacks.clear();return;
@@ -2021,7 +2076,7 @@
       scanPending=false;
       if(previousPath!==location.pathname){
         for(const entry of videoFallbacks.values())entry.group.remove();
-        videoFallbacks.clear();
+        videoFallbacks.clear();mediaToolbars.clear();
         document.querySelectorAll('.'+CLASS).forEach(e=>e.remove());
         document.querySelectorAll('.meta-media-ig-more-row').forEach(e=>e.classList.remove('meta-media-ig-more-row'));
         previousPath=location.pathname;
@@ -2112,10 +2167,12 @@
     window.addEventListener('popstate',scheduleIG);
     window.addEventListener('resize',scheduleIG,{passive:true});
     window.addEventListener('scroll',scheduleVideoFallbacks,{passive:true,capture:true});
+    document.addEventListener('transitionend',scheduleVideoFallbacks,true);
+    document.addEventListener('load',e=>{if(e.target?.tagName==='IMG')scheduleIG();},true);
     for(const event of ['loadedmetadata','loadeddata','play','playing','resize'])document.addEventListener(event,e=>{if(e.target?.tagName==='VIDEO')scheduleIG();},true);
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.4.2 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.4.3 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.4.2 Threads loaded');
+  console.info('[Meta Media Downloader] 6.4.3 Threads loaded');
 })();
