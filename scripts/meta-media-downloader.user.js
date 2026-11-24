@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.0.0
+// @version      6.1.0
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -766,10 +766,29 @@
   // Implements the download workflow independently; no imported IG Helper
   // or Instagram Download Button implementation, resources or runtime libraries.
   function initInstagram() {
-    const CLASS='meta-media-ig-tools', bound=new WeakMap();
+    const CLASS='meta-media-ig-tools',bound=new WeakMap(),groupActions=new WeakMap();
     const css=document.createElement('style');
-    css.textContent='.'+CLASS+'{display:flex;gap:6px;align-items:center;justify-content:flex-end;padding:4px 8px;box-sizing:border-box;flex-wrap:wrap}.'+CLASS+' button{border:1px solid #8886;border-radius:6px;padding:4px 9px;font:500 13px/1.4 system-ui,sans-serif;color:inherit;background:transparent;cursor:pointer;white-space:nowrap}.'+CLASS+' button:hover{background:#8882}.'+CLASS+' button:disabled{opacity:.6;cursor:wait}.'+CLASS+'-floating{position:fixed;right:18px;top:72px;z-index:9999;border-radius:8px;background:#222;color:white;padding:8px}';
+    css.textContent=[
+      '.meta-media-ig-anchor{position:relative!important}',
+      '.'+CLASS+'{position:absolute;top:15px;right:15px;display:flex;flex-direction:row-reverse;align-items:center;gap:8px;z-index:5;line-height:0;background:rgba(0,0,0,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:6px 8px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.1);box-sizing:border-box}',
+      '.'+CLASS+' button{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;min-width:26px;box-sizing:border-box;padding:4px;border:0;border-radius:6px;background:transparent;color:white;cursor:pointer;line-height:0}',
+      '.'+CLASS+' button:hover{background:rgba(255,255,255,.25)}',
+      '.'+CLASS+' button:disabled{opacity:.6;cursor:wait}',
+      '.'+CLASS+' button:focus-visible{outline:2px solid white;outline-offset:2px}',
+      '.'+CLASS+' svg{display:block;width:18px;height:18px;flex:none}',
+      '.'+CLASS+'-floating{position:fixed;top:72px;right:18px;z-index:9999}'
+    ].join('');
     (document.head||document.documentElement).append(css);
+    const icons={
+      current:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
+      all:'<path d="M7 17H6a5 5 0 0 1-1-9.9A7 7 0 0 1 18 8a4.5 4.5 0 0 1 1 8.9h-2M12 11v10m-4-4 4 4 4-4"/>',
+      done:'<path d="m5 12 4 4L19 6"/>',
+      error:'<path d="M12 4v10m0 4v1"/>',
+      busy:'<path d="M12 3a9 9 0 1 1-9 9"/>'
+    };
+    function icon(button,name){
+      button.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+icons[name]+'</svg>';
+    }
     const profileNames=/^[A-Za-z0-9._]{1,30}$/;
     const reserved=new Set(['accounts','direct','explore','reels','reel','p','tv','stories','about','developer','privacy','terms','challenge','web','api']);
     let scanPending=false, previousPath=location.pathname;
@@ -828,7 +847,7 @@
         ?root.carousel_media:Array.isArray(sidecar)&&sidecar.length?sidecar.map(x=>x.node):[root];
       const files=[],seen=new Set();
       let missing=0;
-      for(const raw of attachments.slice(0,30)){
+      for(const [position,raw] of attachments.slice(0,30).entries()){
         const item=raw?.node||raw;
         if(!item){missing++;continue;}
         const video=item.is_video===true||Number(item.media_type)===2||
@@ -843,7 +862,13 @@
         if(!url){missing++;continue;}
         const key=new URL(url).pathname;
         if(seen.has(key))continue;
-        seen.add(key);files.push({type,url});
+        seen.add(key);
+        const aliases=[...new Set([url,...candidates.map(v=>v.url)].map(u=>new URL(u).pathname))];
+        const posterVariants=item.image_versions2?.candidates||item.display_resources||[];
+        const posters=video?[item.display_url,item.thumbnail_src,
+          ...(Array.isArray(posterVariants)?posterVariants.map(v=>v?.url||v?.src):[])]
+          .map(u=>igAsset(u,'image')).filter(Boolean).map(u=>new URL(u).pathname):[];
+        files.push({type,url,position:position+1,aliases,posters});
       }
       return {files,total:attachments.length,missing,
         owner:root.user?.username||root.owner?.username||null,
@@ -949,6 +974,122 @@
       return a;
     }
 
+    // Anchor the controls to the stable media viewport, not an individual slide.
+    function mediaNodes(scope){
+      return [...scope.querySelectorAll('img,video')].filter(n=>{
+        if(n.closest('header,nav,aside')||/profile picture|avatar|頭像|大頭貼/i.test(n.alt||''))return false;
+        const a=n.closest('article'),owner=scope.closest('article');
+        if(a&&owner&&a!==owner)return false;
+        const r=n.getBoundingClientRect(),style=getComputedStyle(n);
+        return r.width>=150&&r.height>=110&&style.display!=='none'&&style.visibility!=='hidden';
+      });
+    }
+    function mediaHost(scope){
+      const nodes=mediaNodes(scope).sort((a,b)=>{
+        const x=a.getBoundingClientRect(),y=b.getBoundingClientRect();
+        return y.width*y.height-x.width*x.height;
+      });
+      const media=nodes[0];
+      if(!media)return null;
+      const r=media.getBoundingClientRect(),ul=media.closest('li')?.parentElement;
+      const origin=ul?.tagName==='UL'&&scope.contains(ul)?ul:media;
+      let host=null;
+      for(let n=origin.parentElement;n&&scope.contains(n);n=n.parentElement){
+        if(n.matches('li,ul,picture,img,video,header,nav,aside'))continue;
+        const q=n.getBoundingClientRect();
+        if(q.width>=r.width*.75&&q.width<=r.width*1.35&&
+           q.height>=r.height*.75&&q.height<=r.height*1.35)host=n;
+        if(host&&(q.width>r.width*1.35||q.height>r.height*1.35))break;
+        if(n===scope)break;
+      }
+      return host;
+    }
+    function intersection(a,b){
+      const left=Math.max(a.left,b.left),right=Math.min(a.right,b.right);
+      const top=Math.max(a.top,b.top),bottom=Math.min(a.bottom,b.bottom);
+      return {left,right,top,bottom,width:Math.max(0,right-left),height:Math.max(0,bottom-top)};
+    }
+    function clippedRect(node,frame){
+      let r=intersection(node.getBoundingClientRect(),frame.getBoundingClientRect());
+      for(let p=node.parentElement;p&&p!==frame;p=p.parentElement){
+        const css=getComputedStyle(p),q=p.getBoundingClientRect();
+        const x=/hidden|clip|auto|scroll/.test(css.overflowX),y=/hidden|clip|auto|scroll/.test(css.overflowY);
+        if(x||y)r=intersection(r,{left:x?q.left:r.left,right:x?q.right:r.right,top:y?q.top:r.top,bottom:y?q.bottom:r.bottom});
+      }
+      return r;
+    }
+    function mediaPath(raw){
+      if(!raw)return null;
+      try{return new URL(raw).pathname;}catch(_){return null;}
+    }
+    function chooseVisible(entries){
+      const videos=entries.filter(x=>x.type==='video');
+      const candidates=entries.filter(x=>x.type==='video'||!videos.some(v=>{
+        const overlap=intersection(x.rect,v.rect);
+        return overlap.width*overlap.height>=Math.min(x.area,v.area)*.75;
+      }));
+      candidates.sort((a,b)=>b.area-a.area||b.ratio-a.ratio);
+      const best=candidates[0],second=candidates[1];
+      if(!best)return null;
+      if(second&&second.area>=best.area*.85){
+        const overlap=intersection(best.rect,second.rect);
+        const path=mediaPath(best.url),other=mediaPath(second.url);
+        const sameSource=!!path&&path===other;
+        if(!sameSource&&overlap.width*overlap.height<Math.min(best.area,second.area)*.75)return null;
+        if(!sameSource&&best.type===second.type)return null;
+      }
+      return best;
+    }
+    function captureCurrent(frame){
+      if(!frame?.isConnected)return null;
+      const entries=[];
+      for(const node of mediaNodes(frame)){
+        const full=node.getBoundingClientRect(),rect=clippedRect(node,frame);
+        const area=rect.width*rect.height,ratio=area/(full.width*full.height);
+        if(ratio<.45||area<15000)continue;
+        const type=node.tagName==='VIDEO'?'video':'image',url=igAsset(directURL(node),type);
+        entries.push({node,type,url,rect,area,ratio,poster:mediaPath(node.poster),path:mediaPath(url)});
+      }
+      const selected=chooseVisible(entries);
+      if(!selected)return null;
+      const slide=selected.node.closest('li'),list=slide?.parentElement;
+      if(list?.tagName==='UL'&&frame.contains(list)){
+        const slides=[...list.children].filter(x=>x.tagName==='LI'&&x.getBoundingClientRect().width>64&&x.querySelector('img,video'));
+        selected.index=slides.indexOf(slide);selected.slideCount=slides.length;
+      }
+      return selected;
+    }
+    function matchCurrent(snapshot,data){
+      if(!snapshot||!data?.files?.length||data.domOnly)return null;
+      const candidates=data.files.filter(f=>f.type===snapshot.type);
+      const matched=candidates.filter(f=>
+        (snapshot.path&&(f.aliases||[mediaPath(f.url)]).includes(snapshot.path))||
+        (snapshot.poster&&(f.posters||[]).includes(snapshot.poster)));
+      if(matched.length===1)return matched[0];
+      if(matched.length>1)return null;
+      // Match by ordinal only if all real slides are mounted and metadata is complete.
+      if(snapshot.slideCount>1&&data.total===snapshot.slideCount&&
+         data.files.length===data.total&&!data.missing&&snapshot.index>=0){
+        const indexed=data.files.find(f=>f.position===snapshot.index+1);
+        if(indexed?.type===snapshot.type)return indexed;
+      }
+      if(data.total===1&&data.files.length===1&&!data.missing&&
+         candidates.length===1&&!snapshot.slideCount)return candidates[0];
+      return null;
+    }
+    async function resolveCurrent(scope,identity,frame){
+      const snapshot=captureCurrent(frame);
+      if(!snapshot)return {files:[],missing:1};
+      const embedded=igCollect(document,identity);
+      let file=matchCurrent(snapshot,embedded);
+      if(!file&&snapshot.url)file={type:snapshot.type,url:snapshot.url,
+        position:snapshot.index>=0?snapshot.index+1:1};
+      if(file)return {files:[file],missing:0,owner:embedded.owner,taken:embedded.taken};
+      const resolved=await resolvePost(scope,identity);
+      file=matchCurrent(snapshot,resolved);
+      return {files:file?[file]:[],missing:file?0:1,owner:resolved.owner,taken:resolved.taken};
+    }
+
     async function resolvePost(scope,identity){
       let best=igDom(scope);
       if(best.missing&&best.files.every(f=>f.type==='image'))best={...best,files:[]};
@@ -1039,62 +1180,75 @@
       return getTimestamp(scope||document);
     }
 
-    function controls(scope,key,resolver,owner,floating=false,validate=()=>true){
+    function controls(scope,key,resolver,owner,options={}){
+      const {host=scope,floating=false,validate=()=>true,allResolver=null}=options;
       const existing=scope?bound.get(scope):null;
-      if(existing?.key===key&&existing.group.isConnected)return;
+      if(existing?.key===key&&existing.group.isConnected&&existing.host===host)return;
       if(existing)existing.group.remove();
+      if(!floating&&(!host||!host.isConnected))return;
       const group=document.createElement('div');
       group.className=CLASS+(floating?' '+CLASS+'-floating':'');
       group.dataset.metaMediaKey=key;
-      const download=document.createElement('button'),open=document.createElement('button');
-      download.type=open.type='button';
-      download.textContent='Download';open.textContent='Open';
-      download.title='下載這則貼文可辨識的全部媒體';
-      open.title='開啟第一個可辨識的原始媒體';
-      group.append(open,download);
+      const current=document.createElement('button');
+      current.type='button';current.dataset.action='current';
+      const all=allResolver?document.createElement('button'):null;
+      const titles={current:'下載當前圖片／影片',all:'下載此貼文全部圖片／影片'};
+      current.title=titles.current;current.setAttribute('aria-label',titles.current);
+      icon(current,'current');group.append(current);
+      if(all){
+        all.type='button';all.dataset.action='all';all.title=titles.all;
+        all.setAttribute('aria-label',titles.all);icon(all,'all');group.append(all);
+      }
+      let busy=false;
       async function act(event,mode){
         event.preventDefault();event.stopPropagation();
-        if(download.disabled)return;
+        if(busy)return;
         if(!validate()){
-          download.title='頁面已切換，請重新選取目前貼文';
-          scheduleIG();
-          return;
+          current.title='頁面已切換，請重新選取目前貼文';scheduleIG();return;
         }
-        // Bind a new popup to the explicit click before awaiting network.
+        const button=mode==='all'?all:current;
+        if(!button)return;
         const tab=mode==='open'?window.open('about:blank','_blank'):null;
         if(tab)try{tab.opener=null}catch(_){}
-        if(mode==='open'&&!tab){open.title='瀏覽器封鎖新視窗';return;}
-        download.disabled=open.disabled=true;
-        const button=mode==='open'?open:download;
+        if(mode==='open'&&!tab){current.title='瀏覽器封鎖新視窗';return;}
+        busy=true;current.disabled=true;if(all)all.disabled=true;
         const currentPath=location.pathname;
-        button.textContent='解析中…';
+        icon(button,'busy');button.title='解析中…';
         try{
-          const data=await resolver();
+          const data=await (mode==='all'?allResolver():resolver());
           if(currentPath!==location.pathname||!group.isConnected||!validate()){if(tab)tab.close();return;}
           const files=data?.files||[];
-          if(!files.length){if(tab)tab.close();button.textContent='無可下載媒體';button.title='無法安全辨識目前媒體；可先開啟該貼文或播放影片再試。';return;}
-          if(mode==='open'){tab.location.replace(files[0].url);button.textContent='已開啟';return;}
-          const user=safeFilenameSegment(owner||username(scope,data),'Instagram');
-          const stamp=timestamp(scope,data);
+          if(!files.length){
+            if(tab)tab.close();icon(button,'error');
+            button.title='無法安全辨識目前媒體；請切換至完整畫面或播放影片再試。';return;
+          }
+          if(mode==='open'){tab.location.replace(files[0].url);icon(button,'done');button.title='已開啟原始媒體';return;}
+          const user=safeFilenameSegment(owner||username(scope,data),'Instagram'),stamp=timestamp(scope,data);
           let failed=0;
           for(let i=0;i<files.length;i++){
-            button.textContent=(i+1)+'/'+files.length;
-            try{await downloadOne(files[i].url,'Instagram-'+user+'-'+stamp+'-'+(i+1)+mediaExtension(files[i].url,files[i].type));}
+            button.title='下載 '+(i+1)+'/'+files.length;
+            const ordinal=files[i].position||i+1;
+            try{await downloadOne(files[i].url,'Instagram-'+user+'-'+stamp+'-'+ordinal+mediaExtension(files[i].url,files[i].type));}
             catch(_){failed++;}
           }
-          button.textContent=failed?'失敗 '+failed+'/'+files.length:data.missing?'部分完成':'已下載';
-          button.title=data.missing?'部分媒體未能辨識；請開啟原始貼文確認':'下載結果';
-        }catch(_){if(tab)tab.close();button.textContent='失敗';}
-        finally{setTimeout(()=>{download.disabled=open.disabled=false;download.textContent='Download';open.textContent='Open';},2200);}
+          icon(button,failed||data.missing?'error':'done');
+          button.title=failed?'失敗 '+failed+'/'+files.length:
+            data.missing?'部分完成：部分媒體未能辨識':'已下載 '+files.length+' 個媒體';
+        }catch(_){if(tab)tab.close();icon(button,'error');button.title='下載失敗';}
+        finally{setTimeout(()=>{
+          busy=false;current.disabled=false;if(all)all.disabled=false;
+          icon(current,'current');if(all)icon(all,'all');
+        },2200);}
       }
-      download.addEventListener('click',e=>act(e,'download'));
-      open.addEventListener('click',e=>act(e,'open'));
+      current.addEventListener('click',e=>act(e,'current'));
+      if(all)all.addEventListener('click',e=>act(e,'all'));
+      groupActions.set(group,{act,all:!!all});
       if(floating)document.body.append(group);
       else{
-        const header=scope.querySelector('header');
-        if(header&&header.parentElement)header.after(group);else scope.prepend(group);
+        if(getComputedStyle(host).position==='static')host.classList.add('meta-media-ig-anchor');
+        host.append(group);
       }
-      if(scope)bound.set(scope,{key,group});
+      if(scope)bound.set(scope,{key,group,host});
     }
 
     function scan(){
@@ -1108,7 +1262,7 @@
         const s=storyScope();
         const key='story:'+story.key;
         if(!document.querySelector('.'+CLASS+'[data-meta-media-key="'+CSS.escape(key)+'"]'))
-          controls(s||document.body,key,()=>resolveStory(storyScope(),story),story.highlight?null:story.owner,true,()=>storyIdentity()?.key===story.key);
+          controls(s||document.body,key,()=>resolveStory(storyScope(),story),story.highlight?null:story.owner,{floating:true,validate:()=>storyIdentity()?.key===story.key});
         return;
       }
       const profile=profileScope();
@@ -1124,7 +1278,12 @@
       for(const article of articles){
         const id=postIdentity(article);
         if(!id)continue;
-        controls(article,'post:'+id.code,()=>resolvePost(article,id),null,false,()=>article.isConnected&&postIdentity(article)?.code===id.code);
+        const frame=mediaHost(article);
+        if(!frame)continue;
+        controls(article,'post:'+id.code,()=>resolveCurrent(article,id,frame),null,{
+          host:frame,allResolver:()=>resolvePost(article,id),
+          validate:()=>article.isConnected&&frame.isConnected&&article.contains(frame)&&postIdentity(article)?.code===id.code
+        });
       }
       // Direct reel/post route without an article: accept only an unambiguous
       // main scope. Do not guess which video on an endless Reels feed is active.
@@ -1133,7 +1292,11 @@
         if(main&&!articles.length&&igURLs(main).size<=1&&
            (!igURLs(main).size||igURLs(main).has(route.code))&&
            [...main.querySelectorAll('video')].filter(visible).length<=1){
-          controls(main,'post:'+route.code,()=>resolvePost(main,route),null,false,()=>main.isConnected&&igIdentity(location.href)?.code===route.code&&igURLs(main).size<=1&&(!igURLs(main).size||igURLs(main).has(route.code)));
+          const frame=mediaHost(main);
+          if(frame)controls(main,'post:'+route.code,()=>resolveCurrent(main,route,frame),null,{
+            host:frame,allResolver:()=>resolvePost(main,route),
+            validate:()=>main.isConnected&&frame.isConnected&&main.contains(frame)&&igIdentity(location.href)?.code===route.code&&igURLs(main).size<=1&&(!igURLs(main).size||igURLs(main).has(route.code))
+          });
         }
       }
     }
@@ -1148,13 +1311,16 @@
       const focused=e.target?.closest?.('article')?.querySelector('.'+CLASS);
       const group=focused||(groups.length===1?groups[0]:null);
       if(!group)return;
-      e.preventDefault();group.querySelectorAll('button')[e.code==='KeyK'?1:0]?.click();
+      const actions=groupActions.get(group);
+      if(!actions)return;
+      actions.act(e,e.code==='KeyI'?'open':e.shiftKey||!actions.all?'current':'all');
     });
     new MutationObserver(scheduleIG).observe(document.body,{childList:true,subtree:true});
     window.addEventListener('popstate',scheduleIG);
+    window.addEventListener('resize',scheduleIG,{passive:true});
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.0.0 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.1.0 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.0.0 Threads loaded');
+  console.info('[Meta Media Downloader] 6.1.0 Threads loaded');
 })();
