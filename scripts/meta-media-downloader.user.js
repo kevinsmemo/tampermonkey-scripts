@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.4.1
+// @version      6.4.2
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -553,7 +553,7 @@
   function xmpPacket(meta) {
     const fields={Platform:meta.platform,Account:meta.account,PostID:meta.code,PostURL:meta.source,
       PublishedAt:meta.published,MediaOrdinal:meta.ordinal,MediaTotal:meta.total,
-      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.4.1',MediaKind:meta.kind};
+      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.4.2',MediaKind:meta.kind};
     const custom=Object.entries(fields).filter(([,v])=>v!==null&&v!==undefined&&v!=='')
       .map(([k,v])=>'<mmd:'+k+'>'+xmlText(v)+'</mmd:'+k+'>').join('');
     const description=meta.caption?'<dc:description><rdf:Alt><rdf:li xml:lang="x-default">'+xmlText(meta.caption)+'</rdf:li></rdf:Alt></dc:description>':'';
@@ -1139,30 +1139,26 @@
     return visible.width>0&&visible.height>0?visible:snapshot.rect;
   }
   function viewerToolbarPosition(media,viewport,w,h,close=null){
-    const gap=12,edge=8;
-    const clamp=(v,min,max)=>Math.min(Math.max(v,min),Math.max(min,max));
-    const leftOutside=media.left-gap-w,rightOutside=media.right+gap;
-    const y=clamp(media.top+gap,viewport.top+edge,viewport.bottom-h-edge);
-    const maxX=viewport.right-w-edge,minX=viewport.left+edge;
-    // Prefer immediately outside the right edge; then outside the left
-    // edge; finally inside the upper-right corner for wide/fullscreen media.
+    // Always keep the entire toolbar within the painted visible media.
+    // Adapt the inset for small images without moving into the black margin.
+    const r=threadsIntersection(media,viewport);
+    const gx=Math.min(12,Math.max(0,(r.width-w)/2));
+    const gy=Math.min(12,Math.max(0,(r.height-h)/2));
+    const right=r.right-w-gx,left=r.left+gx,top=r.top+gy;
     const candidates=[
-      {x:rightOutside,y,mode:'right',ok:rightOutside<=maxX},
-      {x:leftOutside,y,mode:'left',ok:leftOutside>=minX},
-      {x:media.right-w-gap,y,mode:'inset',ok:true},
-      {x:media.left+gap,y,mode:'inset-left',ok:true},
-      {x:media.right-w-gap,y:y+h+gap,mode:'inset-lower',ok:true}
+      {left:right,top},
+      {left:left,top},
+      {left:right,top:Math.min(r.bottom-h-gy,top+h+12)},
+      {left:left,top:Math.min(r.bottom-h-gy,top+h+12)}
     ];
-    for(const c of candidates){
-      if(!c.ok)continue;
-      const x=clamp(c.x,minX,maxX),top=clamp(c.y,viewport.top+edge,viewport.bottom-h-edge);
-      if(close){
-        const r=threadsIntersection({left:x-4,top:top-4,right:x+w+4,bottom:top+h+4},close);
-        if(r.width>0&&r.height>0)continue;
-      }
-      return {left:x,top,mode:c.mode};
-    }
-    return {left:clamp(media.right-w-gap,minX,maxX),top:clamp(y+h+gap,viewport.top+edge,viewport.bottom-h-edge),mode:'inset'};
+    const fits=p=>p.left>=r.left&&p.top>=r.top&&p.left+w<=r.right&&p.top+h<=r.bottom;
+    const avoids=p=>{
+      if(!close)return true;
+      const overlap=threadsIntersection({left:p.left-4,top:p.top-4,right:p.left+w+4,bottom:p.top+h+4},close);
+      return !overlap.width||!overlap.height;
+    };
+    return candidates.find(p=>fits(p)&&avoids(p))||
+      candidates.find(fits)||{left:r.left,top:r.top};
   }
   function positionViewer(entry,candidate){
     const node=candidate.snapshot.node;
@@ -2118,8 +2114,8 @@
     window.addEventListener('scroll',scheduleVideoFallbacks,{passive:true,capture:true});
     for(const event of ['loadedmetadata','loadeddata','play','playing','resize'])document.addEventListener(event,e=>{if(e.target?.tagName==='VIDEO')scheduleIG();},true);
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.4.1 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.4.2 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.4.1 Threads loaded');
+  console.info('[Meta Media Downloader] 6.4.2 Threads loaded');
 })();
