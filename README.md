@@ -6,7 +6,7 @@
 與 Manolo Zocco 的 Threads Video Downloader 不同。先前誤用的草稿已從本 PR 移除。
 
 ## 目前測試版
-- 版本：5.1.0-beta.8
+- 版本：5.2.0
 - 安裝網址：https://raw.githubusercontent.com/kevinsmemo/tampermonkey-scripts/refs/heads/feat/threads-downloader-privacy-first/scripts/threads-net-media-downloader-v5.user.js
 - Pull Request：https://github.com/kevinsmemo/tampermonkey-scripts/pull/1
 - 每則貼文常駐一個灰色 Download 按鈕，位置保留在標頭「⋯」右側。Beta 4 改用緊湊自適應大小，不再硬設最小寬 132px、高 40px、字體 18px；保留貼文內定位，按實際按鈕寬度調整「⋯」的位置。
@@ -20,7 +20,7 @@
 2. 點擊上述安裝網址；若只顯示原始碼，請在 Tampermonkey 的 Utilities / Install from URL 貼上連結。
 3. 開啟 https://www.threads.com/ 並重新整理，確認每則貼文右上方的 Download。
 4. 先測公開單圖，再測多圖、影片；可能需要同意瀏覽器的多檔下載權限。
-5. 如果看不到按鈕，先確認腳本已啟用，Console 應出現 [Threads v5 Maintained] 5.1.0-beta.8 loaded。
+5. 如果看不到按鈕，先確認腳本已啟用，Console 應出現 [Threads v5 Maintained] 5.2.0 loaded。
 
 ## Copy as image 截圖排除
 - Beta 5：使用 Threads 分享選單的 Copy as image 時，在原生截圖動作發生前暫時移除所有 Download 按鈕，避免被截進圖片；預覽關閉後再恢復。
@@ -50,6 +50,13 @@
 - 現在以貼文時間連結與獨立 shortcode 決定每則貼文最小安全容器，拒絕跨貼文媒體；遇到一個容器包含多則貼文時不建立不確定的 Download 綁定。
 - 媒體來源同時檢查目前的 card、/media URL 及內嵌文章，避免回覆誤抓原文圖片；當 DOM 實際影片已可辨識時不讓結構化圖片取代影片。
 - 已完成語法檢查與 7 組模擬 DOM 驗證（原文／回覆獨立識別、共用外層 article、跨貼文排除），但尚未取得所提供短連結的實際回覆頁面，因此無法視為端對端驗證通過。
+
+## 5.2.0：Instagram 內嵌影片與版本編號
+- 新增 text_post_app_info.linked_inline_media 解析，保留原生影片及輪播優先權，不追蹤其他貼文的引用與回覆資料。
+- 當嵌入播放器未提供一般 video 元素時，點擊 Download 後仍可嘗試同源貼文頁面備援。若僅取得封面，不將其視為成功下載影片。
+- 新增轉貼影片無直連提示；不新增權限，不使用第三方下載服務。
+- 自此採用一般語意化版本號，測試狀態由 Draft PR 管理；維持原腳本名稱與 namespace 避免安裝成兩份。
+- 12 項合成測試／回歸檢查及 JavaScript 語法檢查通過；指定 Threads 貼文尚未完成實際下載驗證。
 
 ## 已知限制
 - 尚未通過 Chrome / Threads 的端到端實測。網站 DOM 改版可能造成特定貼文不顯示按鈕或漏抓媒體。
