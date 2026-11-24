@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.4.0
+// @version      6.4.1
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -64,6 +64,7 @@
   const MORE_GAP = 8;
   const VIEWER='tm-threads-media-viewer';
   let viewerEntry=null, viewerOrigin=null, viewerTimer=null;
+  let viewerResizeObserver=null, observedViewerMedia=null;
   const metadataLimit = 64 * 1024 * 1024;
   let scanTimer = null;
   let captureMode = false;
@@ -552,7 +553,7 @@
   function xmpPacket(meta) {
     const fields={Platform:meta.platform,Account:meta.account,PostID:meta.code,PostURL:meta.source,
       PublishedAt:meta.published,MediaOrdinal:meta.ordinal,MediaTotal:meta.total,
-      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.4.0',MediaKind:meta.kind};
+      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.4.1',MediaKind:meta.kind};
     const custom=Object.entries(fields).filter(([,v])=>v!==null&&v!==undefined&&v!=='')
       .map(([k,v])=>'<mmd:'+k+'>'+xmlText(v)+'</mmd:'+k+'>').join('');
     const description=meta.caption?'<dc:description><rdf:Alt><rdf:li xml:lang="x-default">'+xmlText(meta.caption)+'</rdf:li></rdf:Alt></dc:description>':'';
@@ -908,7 +909,7 @@
     // Physical removal, rather than just CSS hiding, prevents inclusion in
     // screenshots even if the renderer ignores external stylesheets.
     document.querySelectorAll('.' + BTN).forEach(button => button.remove());
-    viewerEntry=null;viewerOrigin=null;
+    stopViewerObservation();viewerEntry=null;viewerOrigin=null;
     checkCopyCapture();
   }
 
@@ -1099,12 +1100,85 @@
     return {result:current?.url?[{type:current.type,url:current.url,position:null}]:[],total:null,
       unavailableVideos:current?.type==='video'&&!current.url?1:0,partial:true};
   }
-  function removeViewer(){if(viewerEntry){viewerEntry.group.remove();viewerEntry=null;}}
+  function stopViewerObservation(){
+    viewerResizeObserver?.disconnect();observedViewerMedia=null;
+  }
+  function removeViewer(){
+    stopViewerObservation();
+    if(viewerEntry){viewerEntry.group.remove();viewerEntry=null;}
+  }
+  // A replaced element can span the viewport while object-fit:contain
+  // displays a much smaller image/video inside it. Measure the painted
+  // content, not the full element's letterboxed bounds.
+  function paintedMediaRect(box,iw,ih,fit='fill',position='50% 50%'){
+    if(!(iw>0&&ih>0&&box.width>0&&box.height>0)||!['contain','scale-down','none'].includes(fit))return box;
+    const scale=fit==='none'?1:Math.min(box.width/iw,box.height/ih,fit==='scale-down'?1:Infinity);
+    const w=iw*scale,h=ih*scale;
+    const offset=(token,free,axis)=>{
+      if(token==='center')return free/2;
+      if(token===(axis==='x'?'left':'top'))return 0;
+      if(token===(axis==='x'?'right':'bottom'))return free;
+      if(/^-?[\d.]+%$/.test(token))return free*parseFloat(token)/100;
+      if(/^-?[\d.]+px$/.test(token))return parseFloat(token);
+      return free/2;
+    };
+    let parts=String(position).trim().split(/\s+/);
+    if(parts.length===1)parts=/^(top|bottom)$/.test(parts[0])?['50%',parts[0]]:[parts[0],'50%'];
+    if(parts.length!==2)parts=['50%','50%'];
+    if(/^(top|bottom)$/.test(parts[0])||/^(left|right)$/.test(parts[1]))parts.reverse();
+    const left=box.left+offset(parts[0],box.width-w,'x'),top=box.top+offset(parts[1],box.height-h,'y');
+    return threadsIntersection(box,{left,top,right:left+w,bottom:top+h});
+  }
+  function actualViewerBounds(snapshot){
+    const n=snapshot.node,box=n.getBoundingClientRect(),st=getComputedStyle(n);
+    const isVideo=n.tagName==='VIDEO';
+    const iw=isVideo?n.videoWidth:n.naturalWidth,ih=isVideo?n.videoHeight:n.naturalHeight;
+    // Keep positioning within the visible clipped media bounds.
+    const painted=paintedMediaRect(box,iw,ih,st.objectFit,st.objectPosition);
+    const visible=threadsIntersection(painted,snapshot.rect);
+    return visible.width>0&&visible.height>0?visible:snapshot.rect;
+  }
+  function viewerToolbarPosition(media,viewport,w,h,close=null){
+    const gap=12,edge=8;
+    const clamp=(v,min,max)=>Math.min(Math.max(v,min),Math.max(min,max));
+    const leftOutside=media.left-gap-w,rightOutside=media.right+gap;
+    const y=clamp(media.top+gap,viewport.top+edge,viewport.bottom-h-edge);
+    const maxX=viewport.right-w-edge,minX=viewport.left+edge;
+    // Prefer immediately outside the right edge; then outside the left
+    // edge; finally inside the upper-right corner for wide/fullscreen media.
+    const candidates=[
+      {x:rightOutside,y,mode:'right',ok:rightOutside<=maxX},
+      {x:leftOutside,y,mode:'left',ok:leftOutside>=minX},
+      {x:media.right-w-gap,y,mode:'inset',ok:true},
+      {x:media.left+gap,y,mode:'inset-left',ok:true},
+      {x:media.right-w-gap,y:y+h+gap,mode:'inset-lower',ok:true}
+    ];
+    for(const c of candidates){
+      if(!c.ok)continue;
+      const x=clamp(c.x,minX,maxX),top=clamp(c.y,viewport.top+edge,viewport.bottom-h-edge);
+      if(close){
+        const r=threadsIntersection({left:x-4,top:top-4,right:x+w+4,bottom:top+h+4},close);
+        if(r.width>0&&r.height>0)continue;
+      }
+      return {left:x,top,mode:c.mode};
+    }
+    return {left:clamp(media.right-w-gap,minX,maxX),top:clamp(y+h+gap,viewport.top+edge,viewport.bottom-h-edge),mode:'inset'};
+  }
   function positionViewer(entry,candidate){
-    const r=candidate.close?.getBoundingClientRect(),w=entry.group.offsetWidth||76,h=entry.group.offsetHeight||36;
-    const right=r&&r.left>innerWidth*.6?innerWidth-r.left+8:18;
-    entry.group.style.right=Math.max(8,Math.min(innerWidth-w-8,right))+'px';
-    entry.group.style.top=Math.max(8,Math.min(innerHeight-h-8,r?r.top+(r.height-h)/2:18))+'px';
+    const node=candidate.snapshot.node;
+    if(observedViewerMedia!==node&&typeof ResizeObserver==='function'){
+      stopViewerObservation();
+      viewerResizeObserver=new ResizeObserver(scheduleViewer);
+      viewerResizeObserver.observe(node);
+      if(candidate.root!==node)viewerResizeObserver.observe(candidate.root);
+      observedViewerMedia=node;
+    }
+    const close=candidate.close?.getBoundingClientRect(),w=entry.group.offsetWidth||76,h=entry.group.offsetHeight||36;
+    const media=actualViewerBounds(candidate.snapshot);
+    const viewport={left:0,top:0,right:innerWidth,bottom:innerHeight};
+    const pos=viewerToolbarPosition(media,viewport,w,h,close);
+    entry.group.style.right='auto';entry.group.style.left=Math.round(pos.left)+'px';
+    entry.group.style.top=Math.round(pos.top)+'px';
   }
   function syncViewer(){
     if(captureMode||isCopyPreviewVisible()){removeViewer();return;}
@@ -1165,6 +1239,7 @@
     document.addEventListener('scroll',scheduleViewer,{passive:true,capture:true});
     document.addEventListener('transitionend',scheduleViewer,true);
     document.addEventListener('loadedmetadata',scheduleViewer,true);
+    document.addEventListener('resize',e=>{if(e.target?.tagName==='VIDEO')scheduleViewer();},true);
     document.addEventListener('keydown',e=>{if(e.key==='Escape'&&viewerEntry){removeViewer();viewerOrigin=null;}if(['ArrowLeft','ArrowRight','Escape'].includes(e.key))scheduleViewer();},true);
     new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
     document.addEventListener('load', event => {
@@ -2043,8 +2118,8 @@
     window.addEventListener('scroll',scheduleVideoFallbacks,{passive:true,capture:true});
     for(const event of ['loadedmetadata','loadeddata','play','playing','resize'])document.addEventListener(event,e=>{if(e.target?.tagName==='VIDEO')scheduleIG();},true);
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.4.0 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.4.1 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.4.0 Threads loaded');
+  console.info('[Meta Media Downloader] 6.4.1 Threads loaded');
 })();
