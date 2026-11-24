@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.1.1
+// @version      6.1.2
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -1195,11 +1195,12 @@
       const box=scope.getBoundingClientRect();
       const mediaTop=Math.min(...mediaNodes(frame).map(n=>n.getBoundingClientRect().top));
       const mediaY=Number.isFinite(mediaTop)?mediaTop:frame.getBoundingClientRect().top;
+      const headerBand=Math.min(110,Math.max(64,frame.getBoundingClientRect().height*.16));
       const seen=new Set(),candidates=[];
       for(const el of scope.querySelectorAll('button,[role="button"],[aria-label],svg[aria-label],svg title')){
         const label=[el.getAttribute('aria-label'),el.getAttribute('title'),
           el.tagName.toLowerCase()==='title'?el.textContent:null].filter(Boolean);
-        if(!label.some(x=>/^(?:more(?: options)?|post options|更多(?:選項|操作)?|其他選項|更多選擇|⋯|…|\.{3})$/i.test(x.trim())))continue;
+        if(!label.some(x=>/^(?:more(?: options| actions)?|post options|options|更多(?:選項|操作)?|其他選項|更多選擇|⋯|…|\.{3})$/i.test(x.trim())))continue;
         const control=el.closest('button,[role="button"]');
         if(!control||seen.has(control)||!scope.contains(control)||control.closest('.'+CLASS))continue;
         if(owner&&control.closest('article')!==owner)continue;
@@ -1209,8 +1210,9 @@
         // this media, not comment menus and player controls farther below.
         const cy=r.top+r.height/2;
         const inHeader=!!control.closest('header');
-        if(cy<box.top-4||(!inHeader&&cy>mediaY+12)||r.right<box.left+box.width*.55)continue;
-        if(!inHeader&&cy>mediaY)continue;
+        // Video-first cards place the header over the player. Permit its
+        // bounded upper band, but reject lower player and comment menus.
+        if(cy<box.top-4||cy>mediaY+headerBand||r.right<box.left+box.width*.55)continue;
         seen.add(control);
         candidates.push({control,header:inHeader,cy,right:r.right});
       }
@@ -1233,9 +1235,10 @@
          (!slot||existing.group.parentElement===slot.parent))return;
       if(existing){existing.group.remove();existing.row?.classList.remove('meta-media-ig-more-row');}
       if(!floating&&(!host||!host.isConnected))return;
-      if(more&&!slot)return;
+      // If the native menu wrapper is unavailable, retain the media overlay.
       const group=document.createElement('div');
       group.className=CLASS+(floating?' '+CLASS+'-floating':slot?' '+CLASS+'-header':'');
+      if(!slot&&!floating&&key!=='avatar:'+owner&&host.querySelector('video'))group.style.top='60px';
       group.dataset.metaMediaKey=key;
       const current=document.createElement('button');
       current.type='button';current.dataset.action='current';
@@ -1311,6 +1314,73 @@
       if(scope)bound.set(scope,{key,group,host,more,row});
     }
 
+    // Without a permalink, resolve only the exact current video's CDN
+    // path or poster against a uniquely identified embedded record.
+    function uniqueVideoIdentity(snapshot,doc=document){
+      if(snapshot?.type!=='video')return null;
+      const paths=new Set([snapshot.path,snapshot.poster].filter(Boolean));
+      if(!paths.size)return null;
+      const matches=new Map();
+      for(const script of doc.querySelectorAll('script[type="application/json"],script[type="application/ld+json"]')){
+        const raw=script.textContent||'';
+        if(raw.length>4000000||![...paths].some(p=>raw.includes(p)||raw.includes(p.replace(/\//g,'\\/'))))continue;
+        let obj;try{obj=JSON.parse(raw)}catch(_){continue;}
+        let visited=0;
+        function walk(x,depth){
+          if(!x||typeof x!=='object'||depth>32||++visited>25000)return;
+          if(Array.isArray(x)){for(const child of x)walk(child,depth+1);return;}
+          const code=x.code||x.shortcode;
+          if(typeof code==='string'&&/^[A-Za-z0-9_-]{3,24}$/.test(code)&&
+             (x.video_versions||x.video_url||x.carousel_media||x.edge_sidecar_to_children)){
+            const data=igParse(x);
+            const files=data.files.filter(file=>file.type==='video'&&
+              ((snapshot.path&&(file.aliases||[]).includes(snapshot.path))||
+               (snapshot.poster&&(file.posters||[]).includes(snapshot.poster))));
+            if(files.length===1)matches.set(code,{code,data,file:files[0]});
+          }
+          for(const [k,v] of Object.entries(x))if(k!=='video_versions'&&k!=='image_versions2')walk(v,depth+1);
+        }
+        walk(obj,0);
+      }
+      return matches.size===1?[...matches.values()][0]:null;
+    }
+    async function resolveUnidentifiedVideo(frame,all=false){
+      const snapshot=captureCurrent(frame);
+      if(!snapshot||snapshot.type!=='video')return {files:[],missing:1};
+      const exact=uniqueVideoIdentity(snapshot);
+      if(exact){
+        if(all)return {...exact.data,missing:Math.max(exact.data.missing||0,exact.data.total-exact.data.files.length)};
+        return {files:[exact.file],missing:0,owner:exact.data.owner,taken:exact.data.taken};
+      }
+      // A direct URL establishes only the current media, not completeness.
+      if(snapshot.url)return {files:[{type:'video',url:snapshot.url,position:1}],missing:all?1:0};
+      return {files:[],missing:1};
+    }
+    function bindUnidentifiedVideo(scope,frame){
+      const videos=mediaNodes(frame).filter(n=>n.tagName==='VIDEO');
+      if(videos.length!==1)return;
+      const video=videos[0];
+      const more=postMoreControl(scope,frame);
+      controls(scope,'unidentified-video',()=>resolveUnidentifiedVideo(frame),null,{
+        host:frame,more,allResolver:()=>resolveUnidentifiedVideo(frame,true),
+        validate:()=>scope.isConnected&&frame.isConnected&&scope.contains(frame)&&video.isConnected&&
+          frame.contains(video)&&mediaNodes(frame).filter(n=>n.tagName==='VIDEO').length===1
+      });
+    }
+    function standaloneVideoScope(video){
+      const vr=video.getBoundingClientRect();
+      let fallback=null;
+      for(let n=video.parentElement,depth=0;n&&depth<12&&!n.matches('body,html,main,article,[role="main"]');n=n.parentElement,depth++){
+        const r=n.getBoundingClientRect();
+        if(n.querySelectorAll('video').length!==1||igURLs(n).size>1)break;
+        if(r.width>vr.width*1.6||r.height>vr.height*1.65)break;
+        if(r.width<vr.width*.8||r.height<vr.height*.8)continue;
+        if(!fallback)fallback=n;
+        if(postMoreControl(n,n))return n;
+      }
+      return fallback;
+    }
+
     function scan(){
       scanPending=false;
       if(previousPath!==location.pathname){
@@ -1338,15 +1408,11 @@
       const route=igIdentity(location.href);
       for(const article of articles){
         const id=postIdentity(article);
-        if(!id)continue;
         const frame=mediaHost(article);
         if(!frame)continue;
+        if(!id){bindUnidentifiedVideo(article,frame);continue;}
         const more=postMoreControl(article,frame);
-        if(!more){
-          const previous=bound.get(article);
-          if(previous){previous.group.remove();previous.row?.classList.remove('meta-media-ig-more-row');bound.delete(article);}
-          continue;
-        }
+        // Missing menu labels must not suppress the download controls.
         controls(article,'post:'+id.code,()=>resolveCurrent(article,id,frame),null,{
           host:frame,more,allResolver:()=>resolvePost(article,id),
           validate:()=>article.isConnected&&frame.isConnected&&article.contains(frame)&&postIdentity(article)?.code===id.code
@@ -1365,6 +1431,26 @@
             validate:()=>main.isConnected&&frame.isConnected&&main.contains(frame)&&igIdentity(location.href)?.code===route.code&&igURLs(main).size<=1&&(!igURLs(main).size||igURLs(main).has(route.code))
           });
         }
+      }
+      // Continuous and suggested Reels can lack article and timestamp links.
+      // Resolve a small, unique player scope, never the whole feed.
+      for(const video of document.querySelectorAll('main video,[role="main"] video')){
+        if(video.closest('article')||!visible(video))continue;
+        if(route&&bound.get(document.querySelector('main'))?.group.isConnected)continue;
+        let alreadyBound=false;
+        for(let p=video.parentElement;p&&p!==document.body;p=p.parentElement){
+          if(bound.get(p)?.group.isConnected){alreadyBound=true;break;}
+        }
+        if(alreadyBound)continue;
+        const scope=standaloneVideoScope(video);
+        if(!scope||scope.querySelector('.'+CLASS))continue;
+        const id=postIdentity(scope);
+        const frame=mediaHost(scope)||scope;
+        if(!id){bindUnidentifiedVideo(scope,frame);continue;}
+        controls(scope,'post:'+id.code,()=>resolveCurrent(scope,id,frame),null,{
+          host:frame,more:postMoreControl(scope,frame),allResolver:()=>resolvePost(scope,id),
+          validate:()=>scope.isConnected&&frame.isConnected&&scope.contains(frame)&&postIdentity(scope)?.code===id.code
+        });
       }
     }
     function scheduleIG(){
@@ -1386,8 +1472,8 @@
     window.addEventListener('popstate',scheduleIG);
     window.addEventListener('resize',scheduleIG,{passive:true});
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.1.1 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.1.2 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.1.1 Threads loaded');
+  console.info('[Meta Media Downloader] 6.1.2 Threads loaded');
 })();
