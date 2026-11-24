@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.1.3
+// @version      6.2.0
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -58,8 +58,7 @@
   const MEDIA_SELECTOR = 'picture img, a[href*="/media"] img, video';
   const ALLOWED_HOSTS = ['fbcdn.net', 'cdninstagram.com', 'threads.com', 'threads.net'];
   const installed = new WeakMap();
-  const moreOriginalTranslate = new WeakMap();
-  const MORE_GAP = 12;
+  const MORE_GAP = 8;
   let scanTimer = null;
   let captureMode = false;
   let captureStartedAt = 0;
@@ -73,19 +72,26 @@
 
   const style = document.createElement('style');
   style.textContent = [
-    '.' + BTN + '{display:inline-flex!important;align-items:center;justify-content:center;',
-    'box-sizing:border-box;flex-shrink:0;vertical-align:middle;',
-    'margin-left:8px;padding:5px 10px;min-width:0;height:auto;min-height:28px;',
-    'font:500 13px/1.25 Arial,system-ui,sans-serif;letter-spacing:normal;',
-    'color:#fff!important;background:#666!important;border:0;border-radius:5px;',
-    'cursor:pointer;white-space:nowrap;box-shadow:none!important;}',
-    '.' + BTN + ':hover{background:#777!important;}',
-    '.' + BTN + ':disabled{opacity:.72;cursor:progress;}',
-    '.' + BTN + '.tm-threads-v5-header{position:absolute!important;',
-    'right:12px;top:8px;z-index:100;margin:0!important;}',
-    '[role="dialog"] .' + BTN + ',[aria-modal="true"] .' + BTN + '{display:none!important;}',
+    '.'+BTN+'{position:absolute!important;display:inline-flex!important;flex-direction:row;align-items:center;justify-content:center;gap:8px;z-index:100;margin:0!important;padding:0;border:0;background:transparent;box-shadow:none;box-sizing:border-box;line-height:0;white-space:nowrap;right:12px;top:8px}',
+    '.'+BTN+' button{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;min-width:28px;box-sizing:border-box;padding:3px;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer;line-height:0}',
+    '.'+BTN+' button:hover{background:rgba(128,128,128,.15)}',
+    '.'+BTN+' button:disabled{opacity:.6;cursor:wait}',
+    '.'+BTN+' button:focus-visible{outline:2px solid currentColor;outline-offset:2px}',
+    '.'+BTN+' svg{display:block;width:22px;height:22px;flex:none}',
+    '[role="dialog"] .'+BTN+',[aria-modal="true"] .'+BTN+'{display:none!important}'
   ].join('');
   (document.head || document.documentElement).appendChild(style);
+
+  function downloadIcon(button,name){
+    const icons={
+    current:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
+    all:'<path d="M7 17H6a5 5 0 0 1-1-9.9A7 7 0 0 1 18 8a4.5 4.5 0 0 1 1 8.9h-2M12 11v10m-4-4 4 4 4-4"/>',
+    done:'<path d="m5 12 4 4L19 6"/>',
+    error:'<path d="M12 4v10m0 4v1"/>',
+    busy:'<path d="M12 3a9 9 0 1 1-9 9"/>'
+    };
+    button.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+icons[name]+'</svg>';
+  }
 
   function identityFrom(href) {
     try {
@@ -178,7 +184,13 @@
       const key = parsed.origin + parsed.pathname;
       if (seen.has(key)) continue;
       seen.add(key);
-      files.push({ type: isVideo ? 'video' : 'image', url });
+      const aliases = [...new Set([url,...(isVideo?versions:
+        (Array.isArray(item.image_versions2?.candidates)?item.image_versions2.candidates:[]))
+        .map(v=>mediaURL(v?.url||v?.src)).filter(Boolean)].map(threadsMediaPath).filter(Boolean))];
+      const posters = isVideo ? (Array.isArray(item.image_versions2?.candidates)?
+        item.image_versions2.candidates:[]).map(v=>mediaURL(v?.url||v?.src)).filter(Boolean)
+        .map(threadsMediaPath).filter(Boolean) : [];
+      files.push({ type: isVideo ? 'video' : 'image', url, aliases, posters });
     }
     return { files, total: attachments.length, unavailableVideos, carousel };
   }
@@ -431,77 +443,115 @@
     });
   }
 
-  async function downloadPost(event, card, identity, button) {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-    if (button.disabled) return;
-    button.disabled = true;
-    let failures = 0;
-    try {
-      button.textContent = '解析中…';
-      const { result: files, unavailableVideos, embedded, ambiguous } = await mediaInPost(card, identity);
-      if (!files.length) {
-        if (ambiguous) {
-          button.textContent='無法辨識貼文';
-          button.title='貼文範圍已變動，請重新整理後重試，避免下載其他貼文。';
-          return;
-        }
-        if (embedded) {
-          button.textContent='轉貼影片無直連';
-          button.title='尚未找到這則 Instagram 轉貼影片的 HTTPS 直連。可先播放影片再試，或開啟 Instagram 原始貼文。';
-          console.warn('[Threads v5 Maintained] Embedded video unavailable',{postCode:identity.code});
-          return;
-        }
-        const videos = [...card.querySelectorAll('video')];
-        const hasBlob = videos.some(v => [v.currentSrc, v.src].some(
-          url => typeof url === 'string' && url.startsWith('blob:')
-        ));
-        const hasStreaming = videos.some(v => [v.currentSrc, v.src].some(
-          url => /\.(?:m3u8|mpd)(?:$|[?#])/i.test(url || '')
-        ));
-        button.textContent = unavailableVideos ? '影片無法下載' : '無可下載媒體';
-        button.title = unavailableVideos
-          ? (hasBlob ? '這則影片目前只有 blob: 播放來源，尚未找到可直接下載的 HTTPS 影片網址。' :
-             hasStreaming ? '目前取得的是串流播放清單，而非可直接下載的 MP4。' :
-             'Threads 未提供這則貼文可辨識的影片直連網址。')
-          : '目前找不到這則貼文可下載的媒體，請先確認已開啟原始貼文。';
-        console.warn('[Threads v5 Maintained] No direct download URL', {
-          postCode: identity.code, unavailableVideos,
-          blobPlayer: hasBlob, streamPlaylist: hasStreaming
-        });
+  function threadsMediaPath(raw) {
+    if (!raw) return null;
+    try { return new URL(raw).pathname; } catch (_) { return null; }
+  }
+
+  function threadsIntersection(a,b) {
+    const left=Math.max(a.left,b.left),right=Math.min(a.right,b.right),
+      top=Math.max(a.top,b.top),bottom=Math.min(a.bottom,b.bottom);
+    return {left,right,top,bottom,width:Math.max(0,right-left),height:Math.max(0,bottom-top)};
+  }
+
+  function chooseThreadMedia(entries) {
+    const videos=entries.filter(x=>x.type==='video');
+    const candidates=entries.filter(x=>x.type==='video'||!videos.some(v=>{
+      const r=threadsIntersection(x.rect,v.rect);
+      return r.width*r.height>=Math.min(x.area,v.area)*.75;
+    })).sort((a,b)=>b.area-a.area||b.ratio-a.ratio);
+    const first=candidates[0],second=candidates[1];
+    if(!first)return null;
+    if(second&&second.area>=first.area*.85&&
+       !(first.path&&first.path===second.path&&first.type===second.type))return null;
+    return first;
+  }
+
+  function captureThreadMedia(card,identity) {
+    const entries=[];
+    for(const node of card.querySelectorAll(MEDIA_SELECTOR)){
+      if(!belongsToPost(node,identity,card))continue;
+      const full=node.getBoundingClientRect(),css=getComputedStyle(node);
+      if(full.width<80||full.height<80||css.display==='none'||css.visibility==='hidden')continue;
+      let rect=threadsIntersection(full,card.getBoundingClientRect());
+      for(let p=node.parentElement;p&&p!==card;p=p.parentElement){
+        const st=getComputedStyle(p),r=p.getBoundingClientRect();
+        const x=/hidden|clip|auto|scroll/.test(st.overflowX),y=/hidden|clip|auto|scroll/.test(st.overflowY);
+        if(x||y)rect=threadsIntersection(rect,{left:x?r.left:rect.left,right:x?r.right:rect.right,
+          top:y?r.top:rect.top,bottom:y?r.bottom:rect.bottom});
+      }
+      const area=rect.width*rect.height,ratio=area/(full.width*full.height);
+      if(area<6400||ratio<.45)continue;
+      const type=node.tagName==='VIDEO'?'video':'image',url=directURL(node);
+      entries.push({node,type,url,path:threadsMediaPath(url),poster:threadsMediaPath(node.poster),rect,area,ratio});
+    }
+    return chooseThreadMedia(entries);
+  }
+
+  function selectThreadCurrent(snapshot,files) {
+    if(!snapshot)return null;
+    const candidates=files.map((file,index)=>({file,index})).filter(({file})=>file.type===snapshot.type);
+    const matches=candidates.filter(({file})=>
+      (snapshot.path&&(threadsMediaPath(file.url)===snapshot.path||(file.aliases||[]).includes(snapshot.path)))||
+      (snapshot.poster&&(file.posters||[]).includes(snapshot.poster)));
+    if(matches.length===1)return {...matches[0].file,ordinal:matches[0].index+1};
+    if(matches.length>1)return null;
+    // A verified direct media URL is sufficient; never guess a different
+    // slide from a list of videos, even if only one of them has a usable URL.
+    if(snapshot.url)return {type:snapshot.type,url:snapshot.url,ordinal:1};
+    return null;
+  }
+
+  async function downloadPost(event,card,identity,group,button,mode) {
+    event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
+    const buttons=[...group.querySelectorAll('button')];
+    if(buttons.some(b=>b.disabled)||captureMode)return;
+    const valid=()=>card.isConnected&&group.isConnected&&
+      postTimeCodes(card).size===1&&postTimeCodes(card).has(identity.code);
+    if(!valid())return;
+    // Freeze the visible attachment at click time, not after fetching data.
+    const snapshot=mode==='current'?captureThreadMedia(card,identity):null;
+    if(mode==='current'&&!snapshot){
+      button.title='無法辨識當前媒體：請將輪播停在一張圖片或影片後重試';
+      downloadIcon(button,'error');
+      setTimeout(()=>downloadIcon(button,mode),2200);
+      return;
+    }
+    buttons.forEach(b=>b.disabled=true);
+    let failures=0;
+    try{
+      downloadIcon(button,'busy');button.title='解析中…';
+      const data=await mediaInPost(card,identity);
+      if(!valid()||data.ambiguous)return;
+      const selected=mode==='current'?selectThreadCurrent(snapshot,data.result):null;
+      const files=mode==='current'?(selected?[selected]:[]):data.result;
+      if(!files.length){
+        downloadIcon(button,'error');
+        button.title=data.embedded?'轉貼影片沒有可辨識的直連':
+          mode==='current'?'無法安全辨識目前媒體，請播放影片或切換輪播後重試':
+          '找不到可下載的媒體直連，請開啟原始貼文再試';
         return;
       }
-      const stamp = getTimestamp(card);
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        button.textContent = (i + 1) + '/' + files.length;
-        const name = 'Threads-' + safeFilenameSegment(identity.user) + '-' + stamp +
-          '-' + (i + 1) + mediaExtension(file.url, file.type);
-        try { await downloadOne(file.url, name); }
-        catch (error) {
-          failures++;
-          const reason = String(error?.error || error?.message || error || 'unknown');
-          button.title = '下載請求失敗：' + reason.slice(0, 120) +
-            '。請確認 Tampermonkey 下載權限，或來源 CDN 是否拒絕請求。';
-          console.warn('[Threads v5 Maintained] Download failed', {
-            postCode: identity.code, mediaIndex: i + 1,
-            reason, host: new URL(file.url).hostname
-          });
-        }
+      const stamp=getTimestamp(card);
+      for(let i=0;i<files.length;i++){
+        if(!valid())return;
+        const file=files[i];
+        button.title='下載 '+(i+1)+'/'+files.length;
+        const name='Threads-'+safeFilenameSegment(identity.user)+'-'+stamp+'-'+
+          (file.ordinal||i+1)+mediaExtension(file.url,file.type);
+        try{await downloadOne(file.url,name);}catch(_){failures++;}
       }
-      button.textContent = failures ? ('失敗 ' + failures + '/' + files.length) :
-        unavailableVideos ? '部分完成' : '已下載';
-      // Deliberately do not click Like or Spoiler as a side effect.
-    } catch (error) {
-      button.textContent = '下載失敗';
-      console.warn('[Threads v5 Maintained]', error);
-    } finally {
-      setTimeout(() => {
-        if (!button.isConnected) return;
-        button.textContent = 'Download';
-        button.disabled = false;
-      }, 2600);
+      const partial=mode==='all'&&data.unavailableVideos;
+      downloadIcon(button,failures||partial?'error':'done');
+      button.title=failures?'下載失敗 '+failures+'/'+files.length:
+        partial?'部分完成：部分影片沒有直連':'已下載 '+files.length+' 個媒體';
+    }catch(_){
+      downloadIcon(button,'error');button.title='下載失敗';
+    }finally{
+      setTimeout(()=>{
+        if(!group.isConnected)return;
+        buttons.forEach(b=>{b.disabled=false;downloadIcon(b,b.dataset.action);});
+      },2600);
     }
   }
 
@@ -559,55 +609,42 @@
     return bestWithActions || bestWithMedia;
   }
 
-  function findMoreControl(card, anchor) {
-    // Look close to the post's own timestamp, not in nested quoted posts.
-    const candidates = [...card.querySelectorAll('button,[role="button"]')]
-      .filter(el => {
-        const label = [el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent]
-          .filter(Boolean).join(' ').trim();
-        return /^(more|更多|更多選項|其他選項|options|⋯|•••)$/i.test(label) ||
-          /^(more options|post options)$/i.test(label);
-      });
-    if (!candidates.length) return null;
-    const time = anchor.getBoundingClientRect();
-    candidates.sort((a, b) => {
-      const ar = a.getBoundingClientRect(), br = b.getBoundingClientRect();
-      return (Math.abs(ar.top - time.top) + Math.abs(ar.left - time.right) / 10) -
-        (Math.abs(br.top - time.top) + Math.abs(br.left - time.right) / 10);
-    });
-    return candidates[0];
+  function findMoreControl(card,anchor) {
+    const pattern=/^(?:more(?: options| actions)?|post options|更多(?:選項|操作)?|其他選項|options|⋯|…|•••|\.{3})$/i;
+    const time=anchor.getBoundingClientRect(),c=card.getBoundingClientRect();
+    const candidates=new Set();
+    for(const el of card.querySelectorAll('button,[role="button"],[aria-label],svg title')){
+      const labels=[el.getAttribute('aria-label'),el.getAttribute('title'),
+        el.tagName.toLowerCase()==='title'||el.matches('button,[role="button"]')?el.textContent:null];
+      if(!labels.some(x=>pattern.test(String(x||'').trim())))continue;
+      const control=el.closest('button,[role="button"]');
+      if(!control||!card.contains(control)||control.closest('.'+BTN))continue;
+      const r=control.getBoundingClientRect();
+      if(r.width<10||r.height<10||r.width>80||r.height>80||
+         Math.abs(r.top-time.top)>70||r.right<c.left+c.width*.5)continue;
+      candidates.add(control);
+    }
+    return [...candidates].sort((a,b)=>{
+      const ar=a.getBoundingClientRect(),br=b.getBoundingClientRect();
+      return Math.abs(ar.top-time.top)-Math.abs(br.top-time.top)||br.right-ar.right;
+    })[0]||null;
   }
 
-  // Preserve the original v5 header layout: More, then Download. The React
-  // header already puts More at the far right; inserting a button after it in
-  // normal flow clips the new control. Position Download INSIDE the post's
-  // header boundary, then translate More left to reserve the original order.
-  function layoutHeaderActions(card, button, more) {
-    if (!card.isConnected || !button.isConnected) return;
-    if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
-    if (!more || !more.isConnected) {
-      button.style.top = '8px';
-      button.style.right = '12px';
-      return;
-    }
+  function threadActionPosition(cardRect,menuRect,width,height,scrollTop=0) {
+    if(!menuRect)return {right:12,top:8};
+    return {right:Math.max(8,Math.round(cardRect.right-menuRect.left+MORE_GAP)),
+      top:Math.max(0,Math.round(menuRect.top-cardRect.top+scrollTop+(menuRect.height-height)/2))};
+  }
 
-    // Measure the unshifted More position; otherwise repeated scans would
-    // accumulate offsets and drift out of alignment.
-    if (!moreOriginalTranslate.has(more)) {
-      moreOriginalTranslate.set(more, more.style.translate || '');
-    }
-    more.style.translate = moreOriginalTranslate.get(more);
-    const m = more.getBoundingClientRect();
-    const c = card.getBoundingClientRect();
-    const buttonWidth = Math.max(48, Math.ceil(button.getBoundingClientRect().width));
-    const buttonHeight = Math.ceil(button.getBoundingClientRect().height) || 28;
-    const reserved = buttonWidth + MORE_GAP;
-    const originalRight = Math.min(c.right - 8, Math.max(c.left + buttonWidth + 8, m.right));
-    button.style.right = Math.max(8, Math.round(c.right - originalRight)) + 'px';
-    button.style.top = Math.max(0, Math.round(m.top - c.top +
-      card.scrollTop + (m.height - buttonHeight) / 2)) + 'px';
-    more.style.translate = 'calc(' +
-      (moreOriginalTranslate.get(more) || '0px') + ' - ' + reserved + 'px) 0px';
+  // Keep the native menu in its original location. No translations to undo
+  // during Copy as image. Place the two compact icons immediately to its left.
+  function layoutHeaderActions(card,group,more) {
+    if(!card.isConnected||!group.isConnected)return;
+    if(getComputedStyle(card).position==='static')card.style.position='relative';
+    const c=card.getBoundingClientRect(),r=group.getBoundingClientRect();
+    const m=more?.isConnected?more.getBoundingClientRect():null;
+    const pos=threadActionPosition(c,m,r.width||64,r.height||28,card.scrollTop);
+    group.style.right=pos.right+'px';group.style.top=pos.top+'px';
   }
 
   // Threads "Copy as image" can capture a DOM clone containing custom
@@ -704,39 +741,31 @@
   }, true);
 
   function attach(anchor) {
-    if (captureMode || anchor.closest('[role="dialog"],[aria-modal="true"]')) return;
-    if (!isTimeLink(anchor)) return;
-    const identity = identityFrom(anchor.href);
-    const card = findCard(anchor, identity);
-    if (!card) return;
-    const codes = postTimeCodes(card);
-    if (codes.size !== 1 || !codes.has(identity.code)) return;
-    const existing = installed.get(card);
-    if (existing && existing.button.isConnected) {
-      // A shared DOM container is not proof two timestamps refer to the same
-      // post. Never silently reuse the parent's button for a reply.
-      if (existing.code !== identity.code) {
-        console.warn('[Threads v5 Maintained] Ambiguous post card; ' +
-          'skipping cross-post Download binding', {
-            requestedCode: identity.code, attachedCode: existing.code
-          });
-        return;
-      }
-      layoutHeaderActions(card, existing.button, existing.more);
-      return;
+    if(captureMode||anchor.closest('[role="dialog"],[aria-modal="true"]'))return;
+    if(!isTimeLink(anchor))return;
+    const identity=identityFrom(anchor.href),card=findCard(anchor,identity);
+    if(!card)return;
+    const codes=postTimeCodes(card);
+    if(codes.size!==1||!codes.has(identity.code))return;
+    const existing=installed.get(card);
+    const more=findMoreControl(card,anchor);
+    if(existing?.button.isConnected){
+      if(existing.code!==identity.code){existing.button.remove();installed.delete(card);}
+      else{layoutHeaderActions(card,existing.button,more);return;}
     }
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = BTN;
-    button.textContent = 'Download';
-    button.title = '下載這則 Threads 貼文的所有可用圖片與影片';
-    button.setAttribute('aria-label', '下載此則 Threads 貼文的所有媒體');
-    button.addEventListener('click', event => downloadPost(event, card, identity, button), true);
-    const more = findMoreControl(card, anchor);
-    button.classList.add('tm-threads-v5-header');
-    card.appendChild(button);
-    layoutHeaderActions(card, button, more);
-    installed.set(card, { code: identity.code, button, more });
+    const group=document.createElement('div');
+    group.className=BTN;
+    for(const mode of ['current','all']){
+      const button=document.createElement('button');
+      button.type='button';button.dataset.action=mode;
+      const label=mode==='current'?'下載當前圖片／影片':'下載此貼文全部圖片／影片';
+      button.title=label;button.setAttribute('aria-label',label);
+      downloadIcon(button,mode);group.appendChild(button);
+      button.addEventListener('click',event=>downloadPost(event,card,identity,group,button,mode),true);
+    }
+    card.appendChild(group);
+    layoutHeaderActions(card,group,more);
+    installed.set(card,{code:identity.code,button:group,more});
   }
 
   function scan() {
@@ -790,16 +819,7 @@
 
     ].join('');
     (document.head||document.documentElement).append(css);
-    const icons={
-      current:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
-      all:'<path d="M7 17H6a5 5 0 0 1-1-9.9A7 7 0 0 1 18 8a4.5 4.5 0 0 1 1 8.9h-2M12 11v10m-4-4 4 4 4-4"/>',
-      done:'<path d="m5 12 4 4L19 6"/>',
-      error:'<path d="M12 4v10m0 4v1"/>',
-      busy:'<path d="M12 3a9 9 0 1 1-9 9"/>'
-    };
-    function icon(button,name){
-      button.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+icons[name]+'</svg>';
-    }
+    function icon(button,name){downloadIcon(button,name);}
     const profileNames=/^[A-Za-z0-9._]{1,30}$/;
     const reserved=new Set(['accounts','direct','explore','reels','reel','p','tv','stories','about','developer','privacy','terms','challenge','web','api']);
     let scanPending=false, previousPath=location.pathname;
@@ -1620,8 +1640,8 @@
     window.addEventListener('scroll',scheduleVideoFallbacks,{passive:true,capture:true});
     for(const event of ['loadedmetadata','loadeddata','play','playing','resize'])document.addEventListener(event,e=>{if(e.target?.tagName==='VIDEO')scheduleIG();},true);
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.1.3 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.2.0 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.1.3 Threads loaded');
+  console.info('[Meta Media Downloader] 6.2.0 Threads loaded');
 })();
