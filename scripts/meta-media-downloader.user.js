@@ -1320,7 +1320,7 @@
   // or Instagram Download Button implementation, resources or runtime libraries.
   function initInstagram() {
     const CLASS='meta-media-ig-tools',bound=new WeakMap(),groupActions=new WeakMap();
-    const videoFallbacks=new Map(),mediaToolbars=new Map();
+    const videoFallbacks=new Map(),mediaToolbars=new Map(),storyBatches=new Set();
     let fallbackLayoutPending=false;
     const css=document.createElement('style');
     css.textContent=[
@@ -1728,7 +1728,8 @@
       return /^\d{1,30}$/.test(id)?id:null;
     }
     function storyItemId(item){
-      return storyNumericId(String(item?.pk||item?.id||'').split('_')[0]);
+      const raw=item?.pk||item?.id;
+      return typeof raw==='number'?storyNumericId(raw):storyNumericId(String(raw||'').split('_')[0]);
     }
     function storyGroupData(group,identity){
       if(!group||typeof group!=='object')return null;
@@ -1765,7 +1766,9 @@
             'https://www.instagram.com/stories/'+encodeURIComponent(identity.owner)+'/'+id+'/'
         }});
       }
-      return {files,total:items.length,missing:missing+Math.max(0,items.length-200),
+      const declared=Number(group.media_count||group.story_count||group.count||0);
+      const total=Number.isSafeInteger(declared)&&declared>items.length?declared:items.length;
+      return {files,total,missing:missing+Math.max(0,total- Math.min(items.length,200))+(group.page_info?.has_next_page?1:0),
         owner,userId,groupKey:key};
     }
     function storyGroupsFromJSON(root,identity){
@@ -1937,10 +1940,19 @@
         if(mode==='open'&&!tab){current.title='瀏覽器封鎖新視窗';return;}
         busy=true;current.disabled=true;if(all)all.disabled=true;
         const currentPath=location.pathname;
+        // An explicitly requested story batch owns a frozen group; native
+        // autoplay can change the visible story or unmount the toolbar.
+        const batch=mode==='all'&&key.startsWith('story:')?storyIdentity():null;
+        const batchKey=batch?(batch.highlight?'highlight:'+batch.groupId:'owner:'+batch.owner.toLowerCase()):null;
+        if(batchKey&&storyBatches.has(batchKey)){
+          busy=false;current.disabled=false;if(all)all.disabled=false;
+          button.title='此限時動態組合正在下載';return;
+        }
+        if(batchKey)storyBatches.add(batchKey);
         icon(button,'busy');button.title='解析中…';
         try{
           const data=await (mode==='all'?allResolver():resolver());
-          if(currentPath!==location.pathname||!group.isConnected||!validate()){if(tab)tab.close();return;}
+          if(!batchKey&&(currentPath!==location.pathname||!group.isConnected||!validate())){if(tab)tab.close();return;}
           const files=data?.files||[];
           if(!files.length){
             if(tab)tab.close();icon(button,'error');
@@ -1961,7 +1973,7 @@
             caption:data.caption||null,total:data.domOnly?null:data.total,
             kind:story?(currentPath.startsWith('/stories/highlights/')?'highlight':'story'):avatar?'avatar':'post',
             downloadedAt:new Date().toISOString()};
-          const stillValid=()=>currentPath===location.pathname&&group.isConnected&&validate();
+          const stillValid=()=>!!batchKey||(currentPath===location.pathname&&group.isConnected&&validate());
           let failed=0,originalOnly=0;
           for(let i=0;i<files.length;i++){
             button.title='下載 '+(i+1)+'/'+files.length;
@@ -1974,7 +1986,7 @@
           button.title=failed?'失敗 '+failed+'/'+files.length:
             data.missing?'部分完成：部分媒體未能辨識':'已下載 '+files.length+' 個媒體'+(originalOnly?'（'+originalOnly+' 個保留原檔，未寫入新中繼資料）':'');
         }catch(_){if(tab)tab.close();icon(button,'error');button.title='下載失敗';}
-        finally{setTimeout(()=>{
+        finally{if(batchKey)storyBatches.delete(batchKey);setTimeout(()=>{
           busy=false;current.disabled=false;if(all)all.disabled=false;
           icon(current,'current');if(all)icon(all,'all');
         },2200);}
