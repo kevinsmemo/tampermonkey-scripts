@@ -44,7 +44,8 @@ function pendingCount(){return tx(['meta'],'readonly',(t,done)=>{const r=t.objec
 // Isolated extension storage replaces the previous youtube.com localStorage index.
 function normalizeHistoryRow(v){
  if(!ID.test(v?.videoId||'')||!Number.isSafeInteger(v.count)||v.count<0||v.count>1000000)throw Error('Invalid history row');
- return {videoId:v.videoId,count:v.count,title:typeof v.title==='string'?v.title.slice(0,350):'',updatedAt:Number.isFinite(v.updatedAt)&&v.updatedAt>0?Math.min(v.updatedAt,Date.now()+60000):0};
+ const folderId=typeof v.folderId==='string'&&/^[A-Za-z0-9_-]{10,150}$/.test(v.folderId)?v.folderId:'';
+ return {videoId:v.videoId,count:v.count,title:typeof v.title==='string'?v.title.slice(0,350):'',updatedAt:Number.isFinite(v.updatedAt)&&v.updatedAt>0?Math.min(v.updatedAt,Date.now()+60000):0,...(folderId?{folderId}:{})};
 }
 function historyStorageKey(id){return HISTORY_PREFIX+id;}
 async function historySnapshot(){
@@ -70,7 +71,8 @@ async function historyUpsert(rows){
   allIds.add(r.videoId);
   const same=prior&&Number.isSafeInteger(prior.count)&&prior.count>=0?prior:null;
   const title=r.title||(same?.title||'');
-  const result={count:Math.max(r.count,same?.count||0),title,updatedAt:Math.max(r.updatedAt,same?.updatedAt||0)};
+  const folderId=r.folderId||(same?.folderId||'');
+  const result={count:Math.max(r.count,same?.count||0),title,updatedAt:Math.max(r.updatedAt,same?.updatedAt||0),...(folderId?{folderId}:{})};
   if(!same||JSON.stringify(result)!==JSON.stringify(same))updates[key]=result;
   merged.push({videoId:r.videoId,...result});
   previous[key]=result;
@@ -92,7 +94,7 @@ async function verifyConnection(){
  return state();
 }
 function qstr(s){return "'"+String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"'";}
-async function token(scope,interactive=false){if(!chrome.runtime.getManifest().oauth2?.client_id)throw Error('請先在本機設定 OAuth Client ID（setup.html）');const r=await chrome.identity.getAuthToken({interactive,scopes:[scope]});const value=typeof r==='string'?r:r?.token;if(!value)throw Error('尚未授權 Google 帳號');if(r?.grantedScopes&&!r.grantedScopes.includes(scope))throw Error('未取得需要的 Drive 權限');return value;}
+async function token(scope,interactive=false){if(!chrome.runtime.getManifest().oauth2?.client_id)throw Error('擴充套件缺少 OAuth Client ID 設定');const r=await chrome.identity.getAuthToken({interactive,scopes:[scope]});const value=typeof r==='string'?r:r?.token;if(!value)throw Error('尚未授權 Google 帳號');if(r?.grantedScopes&&!r.grantedScopes.includes(scope))throw Error('未取得需要的 Drive 權限');return value;}
 async function fetchApi(t,url,opts={}){
  const res=await fetch(url,{...opts,headers:{...opts.headers,Authorization:'Bearer '+t},signal:AbortSignal.timeout(30000)});
  if(!res.ok){if(res.status===401)await chrome.identity.removeCachedAuthToken({token:t}).catch(()=>{});throw Error('Google Drive HTTP '+res.status);}
@@ -381,7 +383,7 @@ function localIndexRows(){
  });
 }
 async function summarizeIndex(snapshot){
- const rows=new Map((snapshot?.videos||[]).map(v=>[v.videoId,{videoId:v.videoId,title:v.title,count:v.count,updatedAt:v.updatedAt}]));
+ const rows=new Map((snapshot?.videos||[]).map(v=>[v.videoId,{videoId:v.videoId,title:v.title,count:v.count,updatedAt:v.updatedAt,...(v.folderId?{folderId:v.folderId}:{}) }]));
  for(const v of await localIndexRows()){
   const current=rows.get(v.videoId);
   if(!current)rows.set(v.videoId,v);
@@ -543,6 +545,64 @@ async function get(m){const k=key(m.videoId,m.name),r=await read('meta',k);if(!r
  if(Number(meta.size)>LIMIT)throw Error('PNG exceeds 24 MiB');
  const downloaded=await (await fetchApi(t,API+'/files/'+encodeURIComponent(r.driveId)+'?alt=media')).blob();
  return {data:await encode64(downloaded),modified:Date.parse(meta.modifiedTime)||0};}
+async function deleteSlide(m){
+ const k=key(m.videoId,m.name),r=await read('meta',k);
+ let trashedCloud=false;
+ const c=await config();
+ if(r?.driveId||c){
+  if(r?.driveId&&!c)throw Error('已上傳雲端的截圖需連線 Google Drive 才能一併刪除。');
+  if(c){
+   const t=await auth(c);await checkRoot(t,c);
+   const allowed=await videoDirs(t,c,m.videoId);
+   let targetId=r?.driveId||'';
+   if(targetId){
+    let meta=null;
+    try{
+     meta=await json(t,'/files/'+encodeURIComponent(targetId)+'?fields=id,name,mimeType,parents,trashed');
+    }catch(e){
+     if(!String(e?.message||'').includes('HTTP 404'))throw e;
+    }
+    if(meta&&!meta.trashed){
+     if(meta.mimeType!=='image/png'||!meta.parents?.some(p=>allowed.includes(p)))
+      throw Error('雲端檔案不在對應影片資料夾，已取消刪除。');
+     await json(t,'/files/'+encodeURIComponent(targetId)+'?fields=id,trashed',{
+      method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({trashed:true})
+     });
+     trashedCloud=true;
+    }
+   }else if(allowed.length){
+    for(const dir of allowed){
+     const matches=await children(t,dir,'mimeType = '+qstr('image/png')+' and name = '+qstr(m.name));
+     for(const f of matches){
+      await json(t,'/files/'+encodeURIComponent(f.id)+'?fields=id,trashed',{
+       method:'PATCH',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({trashed:true})
+      });
+      trashedCloud=true;
+     }
+    }
+   }
+  }
+ }
+ if(r){
+  await tx(['meta','bytes'],'readwrite',(t,done)=>{
+   t.objectStore('meta').delete(k);
+   t.objectStore('bytes').delete(k);
+   done(true);
+  });
+ }
+ const remaining=(await records('videoId',m.videoId)).length;
+ const hk=historyStorageKey(m.videoId),prev=(await chrome.storage.local.get(hk))[hk];
+ if(prev){
+  await chrome.storage.local.set({[hk]:{...prev,count:remaining,updatedAt:Date.now()}});
+ }
+ if(trashedCloud){
+  try{await markIndexDirty([m.videoId]);}catch(_){}
+ }
+ await reconcileAlarm();
+ return {deleted:true,trashedCloud,remaining,state:await state()};
+}
 async function index(){return cloudIndex(false,false);}
 async function indexQuick(){return cloudIndex(false,true);}
 async function rebuildIndex(){return cloudIndex(true,false);}
@@ -577,17 +637,18 @@ async function disconnect(){
  return {...await state(),signedOut:true,credentialError,pending};
 }
 async function discoverDefaultRoot(t){
- // drive.file never proves that an unseen folder does not exist. Do not infer
- // missing == absent and never create a duplicate based on this result.
  const byName=await list(t,'mimeType = '+qstr(FOLDER)+' and (name = '+qstr('YouTube Slides')+' or name = '+qstr('YouTube Slides - API')+')');
- if(byName.length>1)throw Error('找到多個可存取的 YouTube Slides 資料夾，請在進階設定指定正確的資料夾，避免誤綁。');
  if(byName.length===1){
-  const candidate=byName[0];
-  // A visible but empty app-created folder may be the new duplicate rather than
-  // the manually created original hidden by drive.file. Ask instead of guessing.
-  const contents=await children(t,candidate.id);
-  if(!contents.length)return {emptyCandidate:candidate};
-  return {root:candidate.id,rootName:candidate.name};
+  return {root:byName[0].id,rootName:byName[0].name};
+ }
+ if(byName.length>1){
+  const candidates=[];
+  for(const f of byName.slice(0,20)){
+   const items=await children(t,f.id).catch(()=>[]);
+   candidates.push({id:f.id,name:f.name,modifiedTime:f.modifiedTime||'',itemCount:items.length});
+  }
+  candidates.sort((a,b)=>b.itemCount-a.itemCount||String(b.modifiedTime).localeCompare(String(a.modifiedTime)));
+  return {candidates};
  }
  return null;
 }
@@ -596,7 +657,7 @@ async function connect(m){
  const prior=(await chrome.storage.local.get('previousDriveConnection')).previousDriveConnection||null;
  const action=m.mode==='existing'?'existing':m.mode==='create'?'create':m.mode==='useVisible'?'useVisible':m.mode==='new'?'legacyNew':'auto';
  const mode=action==='existing'?'existing':action==='legacyNew'?'new':'auto';
- const scope=action==='existing'?ALL_SCOPE:FILE_SCOPE;
+ const scope=ALL_SCOPE;
  // Only an explicit existing-folder action can rebind a previous installation.
  if(current&&action!=='existing'&&mode!==current.mode)throw Error('已綁定資料夾；重新授權請使用上方按鈕，不能以其他模式覆寫現有設定。');
  if(current&&action==='create')throw Error('已有資料夾綁定，無法建立新資料夾。請先確認現有設定。');
@@ -633,20 +694,16 @@ async function connect(m){
    return {...await state(),setupAction:'unchanged'};
   }
  }else if(action==='legacyNew'){
-  // Reauthorization for v0.3.x is handled above; do not automatically create a
-  // legacy folder on first connection.
   throw Error('舊版專用模式已停用，請改用自動尋找或指定既有資料夾。');
  }else if(action==='useVisible'){
-  // A user can explicitly accept an empty candidate without requesting full
-  // Drive access. The candidate must be rediscovered and verified first.
-  const found=await discoverDefaultRoot(t);
-  if(!found?.emptyCandidate||found.emptyCandidate.id!==m.folder)throw Error('選擇的空白資料夾已變更，請重新檢查 Google Drive。');
-  root=found.emptyCandidate.id;rootName=found.emptyCandidate.name;
+  const id=String(m.folder||'').trim();
+  if(!/^[A-Za-z0-9_-]{10,150}$/.test(id))throw Error('無效的資料夾 ID');
+  const r=await json(t,'/files/'+encodeURIComponent(id)+'?fields=id,name,mimeType,trashed');
+  if(r.trashed||r.mimeType!==FOLDER||!r.id)throw Error('選擇的資料夾已不存在或無法存取，請重新檢查 Google Drive。');
+  root=r.id;rootName=r.name;
  }else if(action==='create'){
-  // A create action must be initiated separately from the sign-in/find button.
   const found=await discoverDefaultRoot(t);
-  if(found?.root)throw Error('已找到可存取的 YouTube Slides 資料夾，請先使用現有資料夾。');
-  if(found?.emptyCandidate)throw Error('已找到一個空白的 YouTube Slides 資料夾，請確認後使用它，避免再次建立重複資料夾。');
+  if(found?.root||found?.candidates?.length)throw Error('Google Drive 內已存在 YouTube Slides 資料夾，請直接連接現有資料夾。');
   rootName='YouTube Slides';
   const created=await json(t,'/files?fields=id,name,mimeType',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:rootName,mimeType:FOLDER,parents:['root']})});
   if(!created.id||created.name!==rootName||created.mimeType!==FOLDER)throw Error('新資料夾建立後驗證失敗，請檢查 Google Drive。');
@@ -654,10 +711,10 @@ async function connect(m){
  }else{
   const found=await discoverDefaultRoot(t);
   if(found?.root){root=found.root;rootName=found.rootName;}
-  else{
-   // No configuration is stored and no Drive folder is created. The user has
-   // to explicitly choose the original folder or authorize creating a new one.
-   return {...await state(),setupAction:'needsChoice',emptyCandidate:found?.emptyCandidate?.id||''};
+  else if(found?.candidates?.length){
+   return {...await state(),setupAction:'pickCandidate',candidates:found.candidates};
+  }else{
+   return {...await state(),setupAction:'needsChoice',emptyCandidate:''};
   }
  }
  if(!root)throw Error('無法確認 Google Drive 資料夾，尚未儲存連線設定');
@@ -791,22 +848,76 @@ const resumePending=()=>void queue(async()=>{
 chrome.runtime.onStartup.addListener(resumePending);
 chrome.runtime.onInstalled.addListener(resumePending);
 chrome.action.onClicked.addListener(()=>void chrome.runtime.openOptionsPage());
+async function storageStats(){
+ const allMeta=await records();
+ return tx(['bytes'],'readonly',(t,done)=>{
+  const bytesStore=t.objectStore('bytes');
+  let pendingCount=0,pendingBytes=0,cloudCount=0,cachedCloudCount=0,cachedCloudBytes=0;
+  let remaining=allMeta.length;
+  if(!remaining){done({totalMeta:0,pendingCount:0,pendingBytes:0,cloudCount:0,cachedCloudCount:0,cachedCloudBytes:0});return;}
+  for(const r of allMeta){
+   if(r.state==='pending')pendingCount++;
+   else if(r.state==='cloud')cloudCount++;
+   const req=bytesStore.get(r.key);
+   req.onsuccess=()=>{
+    const b=req.result;
+    const sz=b&&typeof b.size==='number'?b.size:0;
+    if(sz>0){
+     if(r.state==='pending')pendingBytes+=sz;
+     else if(r.state==='cloud'&&r.driveId){cachedCloudCount++;cachedCloudBytes+=sz;}
+    }
+    if(--remaining===0)done({totalMeta:allMeta.length,pendingCount,pendingBytes,cloudCount,cachedCloudCount,cachedCloudBytes});
+   };
+   req.onerror=()=>{
+    if(--remaining===0)done({totalMeta:allMeta.length,pendingCount,pendingBytes,cloudCount,cachedCloudCount,cachedCloudBytes});
+   };
+  }
+ });
+}
+async function clearSyncedCache(){
+ if(syncRunning)throw Error('目前正在同步中，請待同步結束後再清理本機快取。');
+ const allMeta=await records();
+ const targets=allMeta.filter(r=>r.state==='cloud'&&typeof r.driveId==='string'&&r.driveId.length>0);
+ let clearedCount=0,clearedBytes=0;
+ if(targets.length){
+  await tx(['bytes'],'readwrite',(t,done)=>{
+   const bytesStore=t.objectStore('bytes');
+   let remaining=targets.length;
+   for(const r of targets){
+    const req=bytesStore.get(r.key);
+    req.onsuccess=()=>{
+     const b=req.result;
+     if(b&&typeof b.size==='number'){
+      clearedCount++;clearedBytes+=b.size;
+      bytesStore.delete(r.key);
+     }
+     if(--remaining===0)done(true);
+    };
+    req.onerror=()=>{if(--remaining===0)done(true);};
+   }
+  });
+ }
+ return {clearedCount,clearedBytes,stats:await storageStats()};
+}
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  if(sender.id!==chrome.runtime.id||!m||typeof m.type!=='string')return false;
  const options=sender.url===chrome.runtime.getURL('options.html'),yt=/^https:\/\/(?:www|m)\.youtube\.com\//.test(sender.url||'');
- if(!options&&!yt)return false;if(['connect','logout','reauthorize','syncNow','details','verify','previewNames','migrateNames','rebuildIndex'].includes(m.type)&&!options)return false;
- if(['put','get','list'].includes(m.type)&&(!ID.test(m.videoId||'')||(['put','get'].includes(m.type)&&!NAME.test(m.name||'')))){reply({ok:false,error:'Invalid video or filename'});return false;}
+ if(!options&&!yt)return false;if(['connect','logout','reauthorize','syncNow','details','verify','previewNames','migrateNames','storageStats','clearSyncedCache'].includes(m.type)&&!options)return false;
+ if(['put','get','list','deleteSlide'].includes(m.type)&&(!ID.test(m.videoId||'')||(['put','get','deleteSlide'].includes(m.type)&&!NAME.test(m.name||'')))){reply({ok:false,error:'Invalid video or filename'});return false;}
  (async()=>{let data;switch(m.type){
  case 'status':data=await state();break;
  case 'details':data=await details();break;
  case 'verify':data=await queue(verifyConnection);break;
  case 'previewNames':data=await queue(previewNames);break;
  case 'migrateNames':data=await queue(()=>migrateNames(m));break;
+ case 'storageStats':data=await storageStats();break;
+ case 'clearSyncedCache':data=await queue(clearSyncedCache);break;
  case 'options':await chrome.runtime.openOptionsPage();data=true;break;
  case 'connect':data=await queue(()=>connect(m));await arm();await armDirtyIndex(dirtyIndexState(await chrome.storage.local.get(CLOUD_DIRTY_KEYS)));void queue(flush).catch(()=>{});break;
  case 'logout':data=await queue(disconnect);break;
  case 'reauthorize':data=await queue(reauthorize);break;
  case 'put':data=await queueWrite(()=>put(m));try{await arm();}catch(_){}requestImmediateSync();break;
+ case 'deleteSlide':data=await queue(()=>deleteSlide(m));break;
  case 'list':data=await queue(()=>catalog(m.videoId));break;
  case 'get':data=await queue(()=>get(m));break;
  case 'index':data=await queue(index);break;

@@ -1,44 +1,201 @@
 <!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YouTube Slides Extractor</title>
 <style>
-:root{color-scheme:light dark;--bg:#f4f6fa;--surface:#fff;--fg:#192334;--muted:#667085;--border:#dce2ea;--accent:#2859af;--soft:#edf3fc;--good:#087449;--warn:#925300;--bad:#ad3542;--shadow:0 4px 18px #182b4d0a}
-@media(prefers-color-scheme:dark){:root{--bg:#141922;--surface:#202834;--fg:#e6ebf3;--muted:#aeb9c9;--border:#38475a;--accent:#a6c8ff;--soft:#263951;--good:#9be5bd;--warn:#ffd29a;--bad:#ffb2b9;--shadow:none}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,sans-serif}main{max-width:760px;margin:0 auto;padding:36px 24px 48px}header{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:24px}h1{font-size:25px;letter-spacing:-.5px;line-height:1.2;margin:0 0 6px}h2{font-size:17px;margin:0 0 12px}p{margin:6px 0 12px}.muted,small{color:var(--muted);font-size:13px}.card{background:var(--surface);border:1px solid var(--border);border-radius:15px;padding:22px;margin-bottom:16px;box-shadow:var(--shadow)}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.spread{justify-content:space-between}.badge{display:inline-flex;align-items:center;gap:7px;border-radius:30px;padding:4px 11px;font-size:13px;color:var(--muted);background:var(--soft);white-space:nowrap}.dot{width:8px;height:8px;border-radius:50%;background:currentColor}.badge[data-tone=good]{color:var(--good)}.badge[data-tone=warn]{color:var(--warn)}.badge[data-tone=bad]{color:var(--bad)}.metrics{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:18px 0}.metric{border:1px solid var(--border);padding:15px;border-radius:10px;min-width:0}.number{font-size:29px;font-weight:600;line-height:1.25;margin:6px 0;font-variant-numeric:tabular-nums}.time{font-size:15px;font-weight:600;margin:8px 0;overflow-wrap:anywhere}button,.button{font:inherit;cursor:pointer;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--fg);padding:9px 13px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:8px}button:hover:not(:disabled),.button:hover{background:var(--soft)}button:disabled{opacity:.5;cursor:default}.primary{background:#2859af;color:#fff;border-color:#2859af}.primary:hover:not(:disabled){background:#204991}a{color:var(--accent)}button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.folder{border-top:1px solid var(--border);padding-top:14px;margin:16px 0 12px}.field{display:block;width:100%;border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--bg);color:var(--fg);font:inherit;margin:7px 0 12px}.choice{display:flex;align-items:flex-start;gap:12px;padding:12px 13px;border:1px solid var(--border);border-radius:10px;margin:10px 0;cursor:pointer}.choice input{margin-top:6px;accent-color:var(--accent)}.choice span{display:block}.choice:has(input:checked){border-color:var(--accent);background:var(--soft)}.message{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;color:var(--muted);margin-top:12px}.message[data-error=true]{color:var(--bad)}.divider{height:1px;background:var(--border);margin:18px 0}.full{width:100%}[hidden]{display:none!important}footer{font-size:12px;color:var(--muted);text-align:center}@media(max-width:520px){main{padding:20px 14px}.card{padding:16px}.metrics{grid-template-columns:1fr}header{align-items:flex-start}}
+:root{color-scheme:light dark;--bg:#f4f6fa;--surface:#fff;--soft:#eef3fb;--fg:#182230;--muted:#667085;--border:#dce3ed;--accent:#2563eb;--good:#057a55;--good-bg:#ecfdf5;--warn:#b45309;--warn-bg:#fffbeb;--bad:#be123c;--bad-bg:#fff1f2;--shadow:0 6px 24px rgba(15,23,42,.06)}
+@media(prefers-color-scheme:dark){:root{--bg:#11161f;--surface:#1a222f;--soft:#222e40;--fg:#e6ecf5;--muted:#98a6bc;--border:#2c384b;--accent:#60a5fa;--good:#6ee7b7;--good-bg:rgba(16,185,129,.14);--warn:#fcd34d;--warn-bg:rgba(245,158,11,.14);--bad:#fda4af;--bad-bg:rgba(244,63,94,.14);--shadow:none}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 system-ui,-apple-system,sans-serif}
+main{max-width:720px;margin:0 auto;padding:30px 20px 44px}
+header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:20px}
+h1{font-size:22px;letter-spacing:-.3px;line-height:1.25;margin:0}
+h2{font-size:16px;margin:0 0 10px}
+p{margin:6px 0 10px}
+.muted,small{color:var(--muted);font-size:12.5px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:14px;box-shadow:var(--shadow)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spread{justify-content:space-between}
+.badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 11px;font-size:12.5px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+.badge[data-tone=good]{color:var(--good);background:var(--good-bg)}
+.badge[data-tone=warn]{color:var(--warn);background:var(--warn-bg)}
+.badge[data-tone=bad]{color:var(--bad);background:var(--bad-bg)}
+.folder-box{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-radius:10px;background:var(--soft);margin:14px 0}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0 16px}
+.metric{border:1px solid var(--border);padding:12px 14px;border-radius:10px;min-width:0}
+.number{font-size:24px;font-weight:700;line-height:1.25;margin:4px 0;font-variant-numeric:tabular-nums}
+.time{font-size:14px;font-weight:600;margin:6px 0 4px;overflow-wrap:anywhere}
+button,.button{font:inherit;cursor:pointer;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--fg);padding:8px 14px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-weight:500;transition:background .15s,border-color .15s}
+button:hover:not(:disabled),.button:hover{background:var(--soft)}
+button:disabled{opacity:.45;cursor:default}
+.primary{background:#2563eb;color:#fff;border-color:#2563eb}
+.primary:hover:not(:disabled){background:#1d4ed8}
+.ghost{border-color:transparent;background:transparent;color:var(--muted);padding:6px 10px;font-size:13px}
+.ghost:hover:not(:disabled){color:var(--fg);background:var(--soft)}
+.danger-text:hover:not(:disabled){color:var(--bad);background:var(--bad-bg)}
+a{color:var(--accent);text-decoration:none;font-weight:500}
+a:hover{text-decoration:underline}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.field{display:block;width:100%;border:1px solid var(--border);border-radius:8px;padding:9px 12px;background:var(--bg);color:var(--fg);font:inherit;margin:8px 0 10px}
+.choice{border:1.5px solid var(--border);border-radius:12px;padding:14px 16px;margin-top:12px;cursor:pointer;transition:border-color .15s,background .15s}
+.choice[data-selected=true]{border-color:var(--accent);background:var(--soft)}
+.maint-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.maint-row:last-child{border-bottom:0;padding-bottom:2px}
+.maint-info{flex:1;min-width:220px}
+.message{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12.5px;color:var(--muted);margin-top:10px}
+.message:empty{display:none}
+.message[data-error=true]{color:var(--bad)}
+[hidden]{display:none!important}
+footer{font-size:12px;color:var(--muted);text-align:center;margin-top:6px}
+@media(max-width:520px){main{padding:18px 14px}.card{padding:16px}.metrics{grid-template-columns:1fr}}
 </style></head>
 <body><main>
-<header><div><h1>YouTube Slides Extractor</h1><div class="muted">投影片擷取 · Google Drive 同步</div></div><span class="badge" id="version">—</span></header>
-<section class="card" aria-labelledby="syncHeading">
-<div class="row spread"><h2 id="syncHeading" style="margin:0">Google Drive 同步</h2><span class="badge" id="connectionBadge" role="status"><span class="dot"></span><span id="connectionLabel">讀取中…</span></span></div>
-<div class="metrics"><div class="metric"><div class="muted">待同步圖片（此裝置）</div><div class="number" id="pending">—</div><small>成功上傳後自動減少</small></div><div class="metric"><div class="muted">最近成功上傳</div><div class="time" id="uploadedAt">尚無紀錄</div><small id="checkedAt">尚未檢查連線</small></div></div>
-<div class="folder" id="folderSummary" hidden><div class="muted">已綁定的資料夾</div><div class="row spread"><strong id="folderName">—</strong><a id="folderLink" target="_blank" rel="noopener noreferrer">在 Google Drive 開啟 ↗</a></div><div class="muted" id="modeLabel"></div></div>
-<div class="row"><button class="primary" id="sync" disabled>立即同步</button><button id="verify" disabled>檢查連線</button><button id="reauth" hidden disabled>重新授權</button><button id="logout" hidden disabled title="清除本套件的 Google 授權與連線；不刪除圖片">登出 Google</button></div>
-<div class="message" id="result" role="status"></div><div class="message" id="health" role="status"></div>
-</section>
-<section class="card" id="loginCard" hidden>
-<h2>連接 Google Drive</h2>
-<p class="muted">登入後會先尋找本套件有權存取的「YouTube Slides」資料夾。如果搜尋不到，會請你確認要連接既有資料夾，或明確選擇建立新的；不會擅自建立。</p>
-<p><button class="primary full" id="login" disabled>使用 Google 帳號登入並尋找資料夾</button></p>
-<p class="muted">預設使用 <code>drive.file</code> 最小權限。搜尋不到不代表資料夾不存在；若原本已建立，請在進階設定貼上原資料夾網址。</p>
-<div id="noFolderChoices" hidden><p class="message" id="noFolderMessage">目前無法確認是否已有 YouTube Slides 資料夾。若原本有資料，請優先連接既有資料夾。</p><button id="useVisible" type="button" hidden>使用找到的空白資料夾（不建立新的）</button> <button id="createNew" type="button">我確認要建立全新的 YouTube Slides 資料夾</button></div>
+<header>
+  <div><h1>YouTube Slides Extractor</h1><div class="muted">Google Drive 同步與本機空間</div></div>
+  <span class="badge" id="version">—</span>
+</header>
 
-<p class="muted">Google 登入是選用功能；不登入仍可離線擷取與匯出 ZIP。本套件不會將圖片傳送到開發者的帳號。</p>
+<!-- 已連線主卡 -->
+<section class="card" id="connectedCard" aria-labelledby="syncHeading">
+  <div class="row spread">
+    <h2 id="syncHeading" style="margin:0">Google Drive 同步</h2>
+    <span class="badge" id="connectionBadge" role="status"><span class="dot"></span><span id="connectionLabel">讀取中…</span></span>
+  </div>
+  <div class="folder-box" id="folderSummary" hidden>
+    <div style="min-width:0">
+      <div class="muted" id="modeLabel">同步資料夾</div>
+      <strong id="folderName" style="font-size:15px">—</strong>
+    </div>
+    <a id="folderLink" target="_blank" rel="noopener noreferrer" style="white-space:nowrap">開啟 Drive ↗</a>
+  </div>
+  <div class="metrics">
+    <div class="metric"><div class="muted">待同步圖片</div><div class="number" id="pending">—</div><small>成功上傳後自動減少</small></div>
+    <div class="metric"><div class="muted">最近成功上傳</div><div class="time" id="uploadedAt">尚無紀錄</div><small id="checkedAt">尚未檢查連線</small></div>
+  </div>
+  <div class="row spread">
+    <div class="row">
+      <button class="primary" id="sync" disabled>立即同步</button>
+      <button id="verify" disabled>檢查連線</button>
+    </div>
+    <div class="row" style="gap:4px">
+      <button class="ghost" id="reauth" hidden disabled>重新授權</button>
+      <button class="ghost danger-text" id="logout" hidden disabled title="清除本套件的 Google 授權與連線；不刪除圖片">登出</button>
+    </div>
+  </div>
+  <div class="message" id="result" role="status"></div>
+  <div class="message" id="health" role="status"></div>
 </section>
-<section class="card" id="advancedCard"><details id="advancedSetup" class="folder">
-<summary>進階設定：連接或切換既有資料夾</summary>
-<p class="muted">如果你已經有使用中的資料夾，請貼上原始網址。這個功能也可將「誤連到新空白資料夾」的裝置改回原資料夾；前提是沒有待同步圖片，且目前資料夾為空。此模式需要完整 Drive 授權。</p>
-<label for="folder">指定 Google Drive 資料夾網址或 ID</label>
-<input class="field" id="folder" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off">
-<label class="row"><input type="checkbox" id="confirm">我確認需要存取既有資料夾，並同意完整 Drive 授權。</label>
-<p><button id="connectExisting" disabled>連接指定資料夾</button></p>
-</details></section>
-<section class="card" id="namingCard" hidden>
-<h2>影片資料夾命名</h2>
-<p class="muted">新影片資料夾僅顯示標題，YouTube 影片 ID 存在 Google Drive 應用程式專用中繼資料。既有的 ID 資料夾不會自動變動。</p>
-<div class="row"><button id="previewNames">檢查舊資料夾</button><button id="migrateNames" disabled>重新命名選定資料夾</button></div>
-<div class="message" id="namingStatus" role="status"></div>
-<div id="namingList" style="display:grid;gap:10px;margin:12px 0"></div>
-<small>改名只更新資料夾名稱與隱藏 ID，不移動或刪除圖片。若舊圖片尚未建立影片標題索引，可先手動填寫標題。請先完成待上傳圖片的同步，再執行改名。</small>
+
+<!-- 未連線二選一引導卡 -->
+<section class="card" id="loginCard" hidden>
+  <div class="row spread" style="margin-bottom:4px">
+    <h2 style="margin:0">連接 Google Drive</h2>
+    <span class="badge"><span class="dot"></span>尚未登入</span>
+  </div>
+  <div class="muted">選擇一種連接方式；不登入也能離線截圖與匯出 ZIP。</div>
+
+  <div class="choice" id="choiceAuto" data-selected="true">
+    <div class="row spread">
+      <strong>登入 Google 並自動讀取「YouTube Slides」資料夾</strong>
+      <span class="badge" data-tone="good">推薦 · 自動同步</span>
+    </div>
+    <div class="muted" style="margin:4px 0 10px">登入後會直接搜尋你 Google Drive 裡既有的 YouTube Slides 資料夾並自動連接；若有多個同名資料夾會讓你選擇。</div>
+    <div id="autoBody">
+      <button class="primary" id="login" disabled>使用 Google 帳號登入</button>
+      <div id="noFolderChoices" hidden style="margin-top:10px">
+        <div class="message" id="noFolderMessage">在 Google Drive 找不到「YouTube Slides」資料夾。</div>
+        <div id="candidateList" style="display:grid;gap:8px;margin-top:8px"></div>
+        <div class="row" style="margin-top:8px">
+          <button id="useVisible" type="button" hidden>使用找到的資料夾</button>
+          <button id="createNew" type="button">建立全新的 YouTube Slides 資料夾</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="choice" id="choiceExisting" data-selected="false">
+    <div class="row spread">
+      <strong>手動指定其他名稱的 Google Drive 資料夾</strong>
+      <span class="muted">貼上網址或 ID</span>
+    </div>
+    <div class="muted" style="margin-top:4px">如果你的資料夾不是命名為 YouTube Slides，直接貼上網址即可連接。</div>
+    <div id="existingBody" hidden style="margin-top:10px">
+      <input class="field" id="folder" placeholder="貼上 https://drive.google.com/drive/folders/…" autocomplete="off">
+      <label class="row" style="font-size:12.5px;margin-bottom:10px;cursor:pointer">
+        <input type="checkbox" id="confirm"><span>同意完整 Drive 授權以存取指定資料夾</span>
+      </label>
+      <button class="primary" id="connectExisting" disabled>連接指定資料夾</button>
+    </div>
+  </div>
+  <div class="message" id="loginResult" role="status"></div>
 </section>
-<section class="card"><h2>套件更新</h2><p class="muted">未封裝版本需手動下載更新。檢查時只讀取 GitHub 公開版本資訊，不傳送 Google 憑證或圖片。</p><div class="row"><button id="checkUpdate">檢查更新</button><a class="button" href="https://github.com/kevinsmemo/tampermonkey-scripts/archive/refs/heads/chrome-extension-alpha.zip" target="_blank" rel="noopener noreferrer">下載最新 ZIP ↗</a></div><div id="updateResult" class="message" role="status"></div><div class="divider"></div><small>解壓縮後將 chrome-extension 內的檔案覆蓋原本載入的資料夾，再到 chrome://extensions 重新載入。不要移除套件，以免離線圖片遺失。</small></section>
+
+<!-- 維護工具（不折疊，置於本機空間之前） -->
+<section class="card" aria-labelledby="maintHeading">
+  <h2 id="maintHeading">維護工具</h2>
+
+  <div class="maint-row" id="switchRow" hidden>
+    <div class="maint-info">
+      <strong>切換資料夾</strong>
+      <div class="muted">僅在目前資料夾為空且無待同步圖片時允許切換，不會搬移或刪除檔案。</div>
+      <input class="field" id="switchFolder" placeholder="貼上新資料夾網址或 ID…" autocomplete="off" style="margin:6px 0">
+      <label class="row" style="font-size:12.5px;cursor:pointer">
+        <input type="checkbox" id="switchConfirm"><span>同意完整 Drive 授權以切換至指定資料夾</span>
+      </label>
+    </div>
+    <button id="switchConnect" disabled>檢查並切換</button>
+  </div>
+
+  <div class="maint-row">
+    <div class="maint-info">
+      <strong>修復雲端索引</strong>
+      <div class="muted">重新掃描 Google Drive 內所有影片資料夾與 PNG，重建 index.json 與 INDEX.md。</div>
+      <div class="message" id="rebuildResult" role="status"></div>
+    </div>
+    <button id="rebuildIndex" disabled>完整修復</button>
+  </div>
+
+  <div class="maint-row" id="namingRow" hidden>
+    <div class="maint-info">
+      <strong>舊資料夾改名</strong>
+      <div class="muted">將舊版純影片 ID 資料夾改為可讀標題，不移動或刪除圖片。</div>
+      <div class="message" id="namingStatus" role="status"></div>
+      <div id="namingList" style="display:grid;gap:8px;margin-top:8px"></div>
+    </div>
+    <div class="row">
+      <button id="previewNames">檢查舊資料夾</button>
+      <button id="migrateNames" disabled>重新命名</button>
+    </div>
+  </div>
+
+  <div class="maint-row">
+    <div class="maint-info">
+      <strong>套件更新</strong>
+      <div class="muted">未封裝版可比對 GitHub 最新版本；下載覆蓋後至 chrome://extensions 重新載入即可（勿移除）。</div>
+      <div class="message" id="updateResult" role="status"></div>
+    </div>
+    <div class="row">
+      <button id="checkUpdate">檢查更新</button>
+      <a class="button" href="https://github.com/kevinsmemo/tampermonkey-scripts/archive/refs/heads/chrome-extension-alpha.zip" target="_blank" rel="noopener noreferrer">下載 ZIP ↗</a>
+    </div>
+  </div>
+</section>
+
+<!-- 本機空間 -->
+<section class="card" aria-labelledby="cacheHeading">
+  <div class="row spread" style="margin-bottom:6px">
+    <h2 id="cacheHeading" style="margin:0">本機空間</h2>
+    <button class="ghost" id="refreshCache" style="padding:4px 8px;font-size:12px">↻ 重新計算</button>
+  </div>
+  <div class="metrics" style="margin-top:8px">
+    <div class="metric"><div class="muted">已同步快取（可安全清理）</div><div class="number" id="cachedCloudSize">—</div><small id="cachedCloudCount">讀取中…</small></div>
+    <div class="metric"><div class="muted">待同步原圖（受保護）</div><div class="number" id="pendingSize">—</div><small id="pendingBytesNote">尚未上傳前絕不清除</small></div>
+  </div>
+  <div class="row">
+    <button id="clearCache" disabled>清理已同步本機快取</button>
+    <span class="muted">清理不影響 Google Drive；重開舊影片時自動按需載入。</span>
+  </div>
+  <div class="message" id="cacheResult" role="status"></div>
+</section>
+
 <footer>本機擷取優先 · 原圖保留 · 雲端同步需要網路與有效授權</footer>
 </main><script src="options.js"></script></body></html>
