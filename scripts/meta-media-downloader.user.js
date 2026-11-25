@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.5.1
+// @version      6.5.2
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -557,7 +557,7 @@
   function xmpPacket(meta) {
     const fields={Platform:meta.platform,Account:meta.account,PostID:meta.code,PostURL:meta.source,
       PublishedAt:meta.published,MediaOrdinal:meta.ordinal,MediaTotal:meta.total,
-      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.5.1',MediaKind:meta.kind};
+      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.5.2',MediaKind:meta.kind};
     const custom=Object.entries(fields).filter(([,v])=>v!==null&&v!==undefined&&v!=='')
       .map(([k,v])=>'<mmd:'+k+'>'+xmlText(v)+'</mmd:'+k+'>').join('');
     const description=meta.caption?'<dc:description><rdf:Alt><rdf:li xml:lang="x-default">'+xmlText(meta.caption)+'</rdf:li></rdf:Alt></dc:description>':'';
@@ -1332,6 +1332,10 @@
       '.'+CLASS+' button:focus-visible{outline:2px solid white;outline-offset:2px}',
       '.'+CLASS+' svg{display:block;width:18px;height:18px;flex:none}',
       '.'+CLASS+'-floating{position:fixed;top:72px;right:18px;z-index:9999}',
+      '.'+CLASS+'-story-inset{position:fixed!important;right:auto;left:0;top:0;z-index:2147483000;background:rgba(0,0,0,.45);padding:4px 6px;border:0;border-radius:9px;box-shadow:none}',
+      '.'+CLASS+'-story-inset button{width:28px;height:28px;min-width:28px;padding:3px}',
+      '.'+CLASS+'-story-inset svg{width:22px;height:22px}',
+      '.'+CLASS+'-story-inset[hidden]{display:none!important}',
       '.'+CLASS+'-header{position:static;display:inline-flex;flex-direction:row;align-items:center;justify-content:center;flex:0 0 auto;gap:8px;margin:0 8px 0 0;padding:0;border:0;border-radius:0;box-shadow:none;background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;z-index:auto}',
       '.'+CLASS+'-header button{color:inherit;width:28px;height:28px;min-width:28px;padding:3px}',
       '.'+CLASS+'-header button:hover{background:rgba(128,128,128,.15)}',
@@ -2105,12 +2109,65 @@
       entry.group.style.left=Math.round(pos.left)+'px';
       entry.group.style.top=Math.round(pos.top)+'px';
     }
+    // Layout only: do not change the story download resolver. Prefer the
+    // central active media, not smaller neighbouring story preview tiles.
+    function chooseStoryLayout(entries,viewport){
+      const mid=(viewport.left+viewport.right)/2;
+      const minHeight=Math.max(180,(viewport.bottom-viewport.top)*.35);
+      const candidates=entries.filter(e=>e.rect.width>=120&&e.rect.height>=minHeight&&
+        e.rect.left<=mid&&e.rect.right>=mid);
+      candidates.sort((a,b)=>b.rect.width*b.rect.height-a.rect.width*a.rect.height||
+        Math.abs((a.rect.left+a.rect.right)/2-mid)-Math.abs((b.rect.left+b.rect.right)/2-mid));
+      const best=candidates[0];
+      if(!best)return null;
+      return candidates.find(e=>e.type==='video'&&(()=>{
+        const overlap=intersection(e.rect,best.rect);
+        return overlap.width*overlap.height>=.8*best.rect.width*best.rect.height;
+      })())||best;
+    }
+    function storyInsetPosition(rect,w,h){
+      if(rect.width<w||rect.height<h)return null;
+      const gx=Math.min(12,(rect.width-w)/2);
+      // Reserve the native header, progress bar, playback/menu controls
+      // and duration label above the button.
+      const gy=Math.min(108,Math.max(12,Math.round(rect.height*.14)),rect.height-h);
+      return {left:rect.right-w-gx,top:rect.top+gy};
+    }
+    function positionStoryToolbar(group){
+      if(!group?.isConnected)return;
+      const viewport={left:0,top:0,right:innerWidth,bottom:innerHeight};
+      const entries=[];
+      for(const node of document.querySelectorAll('img,video')){
+        if(node.closest('nav,aside,header,.'+CLASS)||/profile picture|avatar|頭像|大頭貼/i.test(node.alt||''))continue;
+        const st=getComputedStyle(node);
+        if(st.display==='none'||st.visibility==='hidden'||Number(st.opacity)===0)continue;
+        const box=node.getBoundingClientRect(),clip=intersection(box,viewport);
+        if(clip.width<120||clip.height<180)continue;
+        const rect=igPaintedBounds(node,clip);
+        if(rect.width<120||rect.height<180)continue;
+        const stack=document.elementsFromPoint((rect.left+rect.right)/2,(rect.top+rect.bottom)/2);
+        // Some players use pointer-events:none. Their geometry remains
+        // valid even if the video element is absent from the hit-test stack.
+        if(stack.includes(node)&&stack.slice(0,stack.indexOf(node)).some(el=>/^(IMG|VIDEO)$/.test(el.tagName)&&el.parentElement!==node.parentElement))continue;
+        entries.push({node,rect,type:node.tagName==='VIDEO'?'video':'image'});
+      }
+      const target=chooseStoryLayout(entries,viewport);
+      if(!target){group.hidden=true;return;}
+      group.hidden=false;
+      const pos=storyInsetPosition(target.rect,group.offsetWidth||40,group.offsetHeight||36);
+      if(!pos){group.hidden=true;return;}
+      group.style.right='auto';
+      group.style.left=Math.round(pos.left)+'px';
+      group.style.top=Math.round(pos.top)+'px';
+    }
     function reconcileVideoFallbacks(){
       fallbackLayoutPending=false;
       for(const entry of mediaToolbars.values())positionMediaOverlay(entry);
       if(storyIdentity()){
         for(const entry of videoFallbacks.values())entry.group.remove();
-        videoFallbacks.clear();return;
+        videoFallbacks.clear();
+        positionStoryToolbar(document.querySelector('.'+CLASS+'-story-inset'));
+        return;
       }
       for(const [video,entry] of videoFallbacks){
         if(!video.isConnected||!entry.group.isConnected){
@@ -2210,8 +2267,12 @@
         scheduleVideoFallbacks();
         const s=storyScope();
         const key='story:'+story.key;
-        if(!document.querySelector('.'+CLASS+'[data-meta-media-key="'+CSS.escape(key)+'"]'))
-          controls(s||document.body,key,()=>resolveStory(storyScope(),story),story.highlight?null:story.owner,{floating:true,validate:()=>storyIdentity()?.key===story.key});
+        let group=document.querySelector('.'+CLASS+'[data-meta-media-key="'+CSS.escape(key)+'"]');
+        if(!group)group=controls(s||document.body,key,()=>resolveStory(storyScope(),story),story.highlight?null:story.owner,{floating:true,validate:()=>storyIdentity()?.key===story.key});
+        if(group){
+          group.classList.add(CLASS+'-story-inset');
+          positionStoryToolbar(group);
+        }
         return;
       }
       const profile=profileScope();
@@ -2296,8 +2357,8 @@
     document.addEventListener('load',e=>{if(e.target?.tagName==='IMG')scheduleIG();},true);
     for(const event of ['loadedmetadata','loadeddata','play','playing','resize'])document.addEventListener(event,e=>{if(e.target?.tagName==='VIDEO')scheduleIG();},true);
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.5.1 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.5.2 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.5.1 Threads loaded');
+  console.info('[Meta Media Downloader] 6.5.2 Threads loaded');
 })();
