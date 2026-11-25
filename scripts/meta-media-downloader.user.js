@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.5.2
+// @version      6.6.0
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -557,7 +557,7 @@
   function xmpPacket(meta) {
     const fields={Platform:meta.platform,Account:meta.account,PostID:meta.code,PostURL:meta.source,
       PublishedAt:meta.published,MediaOrdinal:meta.ordinal,MediaTotal:meta.total,
-      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.5.2',MediaKind:meta.kind};
+      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.6.0',MediaKind:meta.kind};
     const custom=Object.entries(fields).filter(([,v])=>v!==null&&v!==undefined&&v!=='')
       .map(([k,v])=>'<mmd:'+k+'>'+xmlText(v)+'</mmd:'+k+'>').join('');
     const description=meta.caption?'<dc:description><rdf:Alt><rdf:li xml:lang="x-default">'+xmlText(meta.caption)+'</rdf:li></rdf:Alt></dc:description>':'';
@@ -1704,7 +1704,7 @@
     function storyIdentity(){
       const m=/^\/stories\/([^/]+)(?:\/(\d+))?\/?$/.exec(location.pathname);
       if(!m)return null;
-      return {owner:m[1],id:m[1]==='highlights'?null:m[2]||null,highlight:m[1]==='highlights',key:location.pathname};
+      return {owner:m[1],id:m[1]==='highlights'?null:m[2]||null,highlight:m[1]==='highlights',groupId:m[1]==='highlights'?m[2]||null:null,key:location.pathname};
     }
 
     async function resolveStory(scope,identity){
@@ -1719,6 +1719,118 @@
       if(vids.length===1)return {files:vids,missing:0,domOnly:true};
       if(d.missing||d.files.length!==1)return {files:[],missing:1};
       return d;
+    }
+
+    // Resolve one explicit story group only. Do not combine neighbouring
+    // reels, expired stories or other highlight collections.
+    function storyNumericId(value){
+      const id=typeof value==='string'?value:typeof value==='number'&&Number.isSafeInteger(value)?String(value):'';
+      return /^\d{1,30}$/.test(id)?id:null;
+    }
+    function storyItemId(item){
+      return storyNumericId(String(item?.pk||item?.id||'').split('_')[0]);
+    }
+    function storyGroupData(group,identity){
+      if(!group||typeof group!=='object')return null;
+      const raw=group.items||group.edges;
+      if(!Array.isArray(raw)||!raw.length)return null;
+      const items=raw.map(x=>x?.node||x);
+      const owner=group.user?.username||group.owner?.username||null;
+      const userId=storyNumericId(group.user?.pk||group.user?.id||group.owner?.id);
+      const key=String(group.id||group.reel_id||group.pk||'');
+      const isHighlight=key.startsWith('highlight:')||group.reel_type==='highlight_reel'||group.reel_type==='highlight'||group.is_highlight===true;
+      if(identity.highlight){
+        if(!identity.groupId||!(key==='highlight:'+identity.groupId||(isHighlight&&key===identity.groupId)))return null;
+      }else{
+        if(isHighlight||!owner||owner.toLowerCase()!==identity.owner.toLowerCase())return null;
+        if(identity.id&&!items.some(item=>storyItemId(item)===identity.id))return null;
+        if(key&&userId&&key!==userId)return null;
+      }
+      // Reject conflicting item ownership; never trust just the containing key.
+      if(items.some(item=>{
+        const name=item?.user?.username||item?.owner?.username;
+        const uid=storyNumericId(item?.user?.pk||item?.user?.id||item?.owner?.id);
+        return (name&&owner&&name.toLowerCase()!==owner.toLowerCase())||(uid&&userId&&uid!==userId);
+      }))return null;
+      const files=[],seen=new Set();let missing=0;
+      for(const [i,item] of items.slice(0,200).entries()){
+        const id=storyItemId(item);
+        if(!id||seen.has(id)){missing++;continue;}seen.add(id);
+        const p=igParse(item);
+        if(p.files.length!==1||p.missing){missing++;continue;}
+        const account=owner||p.owner||(!identity.highlight?identity.owner:null);
+        files.push({...p.files[0],position:i+1,storyMeta:{
+          account,published:postDate(p.taken),caption:p.caption||null,code:id,
+          source:identity.highlight?'https://www.instagram.com/stories/highlights/'+identity.groupId+'/':
+            'https://www.instagram.com/stories/'+encodeURIComponent(identity.owner)+'/'+id+'/'
+        }});
+      }
+      return {files,total:items.length,missing:missing+Math.max(0,items.length-200),
+        owner,userId,groupKey:key};
+    }
+    function storyGroupsFromJSON(root,identity){
+      let best=null,count=0;
+      function walk(x,depth){
+        if(!x||typeof x!=='object'||depth>34||++count>50000)return;
+        if(Array.isArray(x)){for(const y of x)walk(y,depth+1);return;}
+        if(Array.isArray(x.items)||Array.isArray(x.edges)){
+          const p=storyGroupData(x,identity);
+          if(p&&(!best||p.files.length>best.files.length))best=p;
+        }
+        // Some REST responses put the reel ID in the map key only.
+        if(x.reels&&typeof x.reels==='object'&&!Array.isArray(x.reels)){
+          for(const [key,value] of Object.entries(x.reels)){
+            if(!value||typeof value!=='object')continue;
+            const p=storyGroupData({...value,id:value.id||key},identity);
+            if(p&&(!best||p.files.length>best.files.length))best=p;
+          }
+        }
+        for(const [k,v] of Object.entries(x))if(!['video_versions','image_versions2','display_resources'].includes(k))walk(v,depth+1);
+      }
+      walk(root,0);return best;
+    }
+    function storyGroupsFromDocument(doc,identity){
+      let best=null;
+      for(const el of doc.querySelectorAll('script[type="application/json"],script[type="application/ld+json"]')){
+        const raw=el.textContent||'';
+        if(raw.length>8000000||!(identity.highlight?raw.includes(identity.groupId||'__missing__'):raw.toLowerCase().includes(identity.owner.toLowerCase())))continue;
+        let parsed;try{parsed=JSON.parse(raw);}catch(_){continue;}
+        const p=storyGroupsFromJSON(parsed,identity);
+        if(p&&(!best||p.files.length>best.files.length))best=p;
+      }
+      return best;
+    }
+    async function resolveAllStories(identity){
+      let best=storyGroupsFromDocument(document,identity);
+      if(best?.files.length===best?.total&&!best?.missing&&best?.total>0)return best;
+      // Exact same-origin page data may contain a complete group not present
+      // in the hydrated document. Only requested on an explicit button click.
+      const html=await igFetch(identity.key,{Accept:'text/html'});
+      if(html){
+        const doc=new DOMParser().parseFromString(html,'text/html');
+        const p=storyGroupsFromDocument(doc,identity);
+        if(p&&(!best||p.files.length>best.files.length))best=p;
+      }
+      if(best?.files.length===best?.total&&!best?.missing&&best?.total>0)return best;
+      const appId=igAppId()||'936619743392459';
+      const headers={'X-IG-App-ID':appId,Accept:'application/json'};
+      let reel=identity.highlight&&identity.groupId?'highlight:'+identity.groupId:best?.userId;
+      if(!reel&&!identity.highlight&&/^[A-Za-z0-9._]{1,30}$/.test(identity.owner)){
+        const raw=await igFetch('/api/v1/users/web_profile_info/?username='+encodeURIComponent(identity.owner),headers);
+        try{
+          const u=JSON.parse(raw||'null')?.data?.user;
+          if(u?.username?.toLowerCase()===identity.owner.toLowerCase())reel=storyNumericId(u.id||u.pk);
+        }catch(_){}
+      }
+      if(reel){
+        const raw=await igFetch('/api/v1/feed/reels_media/?reel_ids='+encodeURIComponent(reel),headers);
+        try{
+          const p=storyGroupsFromJSON(JSON.parse(raw||'null'),identity);
+          if(p&&(!best||p.files.length>best.files.length))best=p;
+        }catch(_){}
+      }
+      // Do not pretend that a single displayed item is a complete group.
+      return best||{files:[],total:0,missing:1};
     }
 
     function profileScope(){
@@ -1804,7 +1916,7 @@
       const current=document.createElement('button');
       current.type='button';current.dataset.action='current';
       const all=allResolver?document.createElement('button'):null;
-      const titles={current:'下載當前圖片／影片',all:'下載此貼文全部圖片／影片'};
+      const titles={current:key.startsWith('story:')?'下載目前限時動態':'下載當前圖片／影片',all:key.startsWith('story:')?'下載目前帳號的全部限時動態／目前精選組合':'下載此貼文全部圖片／影片'};
       current.title=titles.current;current.setAttribute('aria-label',titles.current);
       icon(current,'current');group.append(current);
       if(all){
@@ -1855,7 +1967,7 @@
             button.title='下載 '+(i+1)+'/'+files.length;
             if(!stillValid())return;
             const ordinal=files[i].position||(common.total===1||avatar?1:null);
-            try{const status=await saveMedia(files[i],{...common,ordinal},stillValid);if(status==='original')originalOnly++;}
+            try{const status=await saveMedia(files[i],{...common,...(files[i].storyMeta||{}),ordinal},stillValid);if(status==='original')originalOnly++;}
             catch(_){failed++;}
           }
           icon(button,failed||data.missing?'error':'done');
@@ -2268,7 +2380,7 @@
         const s=storyScope();
         const key='story:'+story.key;
         let group=document.querySelector('.'+CLASS+'[data-meta-media-key="'+CSS.escape(key)+'"]');
-        if(!group)group=controls(s||document.body,key,()=>resolveStory(storyScope(),story),story.highlight?null:story.owner,{floating:true,validate:()=>storyIdentity()?.key===story.key});
+        if(!group)group=controls(s||document.body,key,()=>resolveStory(storyScope(),story),story.highlight?null:story.owner,{floating:true,allResolver:()=>resolveAllStories(story),validate:()=>storyIdentity()?.key===story.key});
         if(group){
           group.classList.add(CLASS+'-story-inset');
           positionStoryToolbar(group);
@@ -2357,8 +2469,8 @@
     document.addEventListener('load',e=>{if(e.target?.tagName==='IMG')scheduleIG();},true);
     for(const event of ['loadedmetadata','loadeddata','play','playing','resize'])document.addEventListener(event,e=>{if(e.target?.tagName==='VIDEO')scheduleIG();},true);
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.5.2 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.6.0 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.5.2 Threads loaded');
+  console.info('[Meta Media Downloader] 6.6.0 Threads loaded');
 })();
