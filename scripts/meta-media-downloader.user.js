@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Meta Media Downloader
 // @namespace    https://github.com/kevinsmemo/tampermonkey-scripts
-// @version      6.6.0
+// @version      6.6.1
 // @description  Download photos and videos from Threads and Instagram with isolated site adapters.
 // @author       StevenJon0826 (original); kevinsmemo (maintenance)
 // @homepageURL  https://github.com/kevinsmemo/tampermonkey-scripts
@@ -173,8 +173,9 @@
       const item = raw?.node || raw?.media || raw;
       if (!item || typeof item !== 'object') continue;
       const versions = Array.isArray(item.video_versions) ? item.video_versions : [];
-      const isVideo = versions.length > 0 || item.media_type === 2 ||
-        String(item.media_type || '').toUpperCase() === 'VIDEO';
+      const isVideo = versions.length > 0 || Number(item.media_type) === 2 ||
+        String(item.media_type || '').toUpperCase() === 'VIDEO' ||
+        item.is_video===true || !!item.video_url;
       let url = null;
       if (isVideo) {
         const candidates = versions.map((v, i) => ({
@@ -441,7 +442,7 @@
     const embedded = Boolean(instagram || structured.linked);
     // Never report a video as downloaded when only its poster was obtained.
     if (!structured.carousel && !result.some(f=>f.type==='video') &&
-        (instagram || (structured.linked && structured.unavailableVideos>0))) {
+        (instagram || videoCount>0 || (structured.linked && structured.unavailableVideos>0))) {
       return {result:[],unavailableVideos:Math.max(1,structured.unavailableVideos),
         embedded:true};
     }
@@ -506,7 +507,7 @@
     return chooseThreadMedia(entries);
   }
 
-  function selectThreadCurrent(snapshot,files) {
+  function selectThreadCurrent(snapshot,files,proof=null) {
     if(!snapshot)return null;
     const candidates=files.map((file,index)=>({file,index})).filter(({file})=>file.type===snapshot.type);
     const matches=candidates.filter(({file})=>
@@ -514,6 +515,12 @@
       (snapshot.poster&&(file.posters||[]).includes(snapshot.poster)));
     if(matches.length===1)return {...matches[0].file,ordinal:matches[0].file.position||null};
     if(matches.length>1)return null;
+    // An exact complete one-attachment post is not ambiguous, even when
+    // its actual player has only a blob URL and a transformed/no poster.
+    // Never infer the current slide from a partial multi-attachment record.
+    if(snapshot.type==='video'&&proof?.total===1&&!proof.partial&&!proof.unavailableVideos&&
+       files.length===1&&candidates.length===1&&!snapshot.url)
+      return {...candidates[0].file,ordinal:candidates[0].file.position||1};
     // A verified direct media URL is sufficient; never guess a different
     // slide from a list of videos, even if only one of them has a usable URL.
     if(snapshot.url)return {type:snapshot.type,url:snapshot.url,ordinal:null};
@@ -557,7 +564,7 @@
   function xmpPacket(meta) {
     const fields={Platform:meta.platform,Account:meta.account,PostID:meta.code,PostURL:meta.source,
       PublishedAt:meta.published,MediaOrdinal:meta.ordinal,MediaTotal:meta.total,
-      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.6.0',MediaKind:meta.kind};
+      DownloadedAt:meta.downloadedAt,DownloaderVersion:'6.6.1',MediaKind:meta.kind};
     const custom=Object.entries(fields).filter(([,v])=>v!==null&&v!==undefined&&v!=='')
       .map(([k,v])=>'<mmd:'+k+'>'+xmlText(v)+'</mmd:'+k+'>').join('');
     const description=meta.caption?'<dc:description><rdf:Alt><rdf:li xml:lang="x-default">'+xmlText(meta.caption)+'</rdf:li></rdf:Alt></dc:description>':'';
@@ -708,14 +715,14 @@
       downloadIcon(button,'busy');button.title='解析中…';
       const data=viewer?await viewerData(viewer,snapshot):await mediaInPost(card,identity);
       if(!valid()||data.ambiguous)return;
-      let selected=mode==='current'?selectThreadCurrent(snapshot,data.result):null;
+      let selected=mode==='current'?selectThreadCurrent(snapshot,data.result,data):null;
       if(thumb&&mode==='current'&&snapshot.type==='image'){
         const videoMatches=data.result.filter(file=>file.type==='video'&&snapshot.path&&
           (file.posters||[]).includes(snapshot.path));
         if(videoMatches.length===1)selected=videoMatches[0];
         else if(videoMatches.length>1||snapshot.videoCover||data.embedded){
           const vids=data.result.filter(file=>file.type==='video');
-          selected=data.embedded&&vids.length===1&&data.result.length===1?vids[0]:null;
+          selected=(data.embedded||snapshot.videoCover)&&data.total===1&&!data.partial&&!data.unavailableVideos&&vids.length===1&&data.result.length===1?vids[0]:null;
         }
       }
       const files=mode==='current'?(selected?[selected]:[]):data.result;
@@ -1148,21 +1155,41 @@
     if((route&&!samePost(route,entry.id))||(local&&!samePost(local,entry.id))||(entry.routeBound&&!route))return false;
     return !!viewerRect(entry.root)&&!!viewerSnapshot(entry.root);
   }
+  function preferViewerRecord(current,remote){
+    if(!remote?.files?.length)return current;
+    const videos=p=>p.files.filter(f=>f.type==='video').length;
+    const rank=p=>Number(!!p.carousel)*1000+p.files.length*20+p.total;
+    if(videos(remote)>videos(current)||
+       (videos(remote)===videos(current)&&rank(remote)>rank(current)))return remote;
+    return current;
+  }
   async function viewerData(entry,snapshot){
     const id=entry.id,card=entry.card;
     let data=null;
     if(validCard(card,id)){
       data=await mediaInPost(card,id);
       if(!data.ambiguous&&data.total===data.result.length&&data.total>0&&!data.unavailableVideos&&
-        (!snapshot||selectThreadCurrent(snapshot,data.result)?.ordinal))return data;
+        (!snapshot||selectThreadCurrent(snapshot,data.result,data)?.ordinal))return data;
     }
     let exact=collectStructuredPost(document,id.code);
-    if(!exact.files.length||!exact.carousel||exact.unavailableVideos||exact.total>exact.files.length){
+    const exactComplete=exact.files.length>0&&exact.total===exact.files.length&&!exact.unavailableVideos;
+    const knownCurrent=!snapshot||!!selectThreadCurrent(snapshot,exact.files,exact)?.ordinal;
+    if(!exactComplete||!knownCurrent||(!snapshot&&!exact.carousel)){
       const remote=await permalinkPostMedia(id);
-      if(remote?.files.length&&(remote.carousel||remote.files.length>=exact.files.length))exact=remote;
+      exact=preferViewerRecord(exact,remote);
     }
-    if(exact.files.length)return {result:exact.files,total:exact.total,postMeta:exact.postMeta,embedded:exact.linked,
-      unavailableVideos:exact.unavailableVideos,partial:exact.total>exact.files.length};
+    const active=snapshot||viewerSnapshot(entry.root);
+    if(exact.files.length){
+      // A visible video player proves a still-only record is insufficient.
+      // In particular, Download all must not report a poster as the video.
+      if(active?.type==='video'&&!exact.files.some(f=>f.type==='video')){
+        if(data?.result?.some(f=>f.type==='video'))return {...data,partial:true};
+        return {result:active.url?[{type:'video',url:active.url,position:null}]:[],total:null,
+          unavailableVideos:active.url?0:1,partial:true,postMeta:exact.postMeta,embedded:exact.linked};
+      }
+      return {result:exact.files,total:exact.total,postMeta:exact.postMeta,embedded:exact.linked,
+        unavailableVideos:exact.unavailableVideos,partial:exact.total>exact.files.length};
+    }
     if(data?.result?.length)return {...data,partial:true};
     const current=snapshot||viewerSnapshot(entry.root);
     return {result:current?.url?[{type:current.type,url:current.url,position:null}]:[],total:null,
@@ -2481,8 +2508,8 @@
     document.addEventListener('load',e=>{if(e.target?.tagName==='IMG')scheduleIG();},true);
     for(const event of ['loadedmetadata','loadeddata','play','playing','resize'])document.addEventListener(event,e=>{if(e.target?.tagName==='VIDEO')scheduleIG();},true);
     scheduleIG();
-    console.info('[Meta Media Downloader] 6.6.0 Instagram loaded');
+    console.info('[Meta Media Downloader] 6.6.1 Instagram loaded');
   }
 
-  console.info('[Meta Media Downloader] 6.6.0 Threads loaded');
+  console.info('[Meta Media Downloader] 6.6.1 Threads loaded');
 })();
